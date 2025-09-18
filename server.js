@@ -21,7 +21,6 @@ app.use(
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
-<<<<<<< HEAD
 // Database connection - only connect in production or if not on Vercel
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   console.log("Connecting to MongoDB...")
@@ -44,22 +43,6 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 } else {
   console.log("Running on Vercel - MongoDB connection will be handled by serverless functions")
 }
-=======
-// Database connection
-mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log("✅ MongoDB connected successfully")
-    console.log("Database name:", mongoose.connection.name)
-  })
-  .catch((err) => {
-    console.error("❌ MongoDB connection error:", err)
-    process.exit(1)
-  })
->>>>>>> origin/main
 
 // Routes
 app.use("/api/auth", authRoutes)
@@ -108,7 +91,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong!" })
 })
 
-<<<<<<< HEAD
 // Only listen locally if not on Vercel
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   const PORT = process.env.PORT || 5000
@@ -121,7 +103,3 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 
 // Export the Express API for Vercel
 module.exports = app
-=======
-// 👇 Export app instead of listening here
-module.exports = app
->>>>>>> origin/main
