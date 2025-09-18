@@ -22,10 +22,6 @@ app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
 // Database connection
-console.log("Connecting to MongoDB...")
-console.log("MongoDB URI:", process.env.MONGO_URI ? "Set" : "Not set")
-console.log("JWT Secret:", process.env.JWT_SECRET ? "Set" : "Not set")
-
 mongoose
   .connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
@@ -85,9 +81,5 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Something went wrong!" })
 })
 
-const PORT = process.env.PORT || 5000
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
-  console.log(`🌐 Health check: http://localhost:${PORT}/api/health`)
-  console.log(`🔐 Auth endpoint: http://localhost:${PORT}/api/auth/login`)
-})
+// 👇 Export app instead of listening here
+module.exports = app
