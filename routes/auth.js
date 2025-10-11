@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken")
 const crypto = require("crypto")
 const router = express.Router()
 const nodemailer = require("nodemailer")
+const { addClient, removeClient, broadcastToRoles } = require("../realtime") // import realtime hub
 
 // Admin verification code - In production, this should be in environment variables
 const ADMIN_VERIFICATION_CODE = "COMPANY"
@@ -115,6 +116,19 @@ router.post("/register", async (req, res) => {
     })
     await notification.save()
     console.log("✅ Notification created for new registration request")
+
+    try {
+      broadcastToRoles(["admin"], {
+        _id: notification._id,
+        type: notification.type,
+        message: notification.message,
+        link: notification.link,
+        createdAt: notification.createdAt,
+      })
+      console.log("[v0] Realtime: broadcasted registration_request to admins")
+    } catch (e) {
+      console.log("[v0] Realtime broadcast (registration) failed:", e?.message)
+    }
 
     res.status(201).json({
       message: "Registration request submitted successfully! Please wait for admin approval before you can login.",
@@ -705,6 +719,55 @@ router.put("/notifications/:id/read", auth, async (req, res) => {
   } catch (error) {
     console.error("Error marking notification as read:", error)
     res.status(500).json({ error: error.message })
+  }
+})
+
+router.get("/notifications/stream", auth, async (req, res) => {
+  try {
+    const role = req.user.role
+
+    // Only allow roles that can receive notifications today
+    // Adjust if employees should receive some notifications
+    const allowed = ["admin", "manager", "hr"]
+    if (!allowed.includes(role)) {
+      return res.status(403).json({ error: "Live notifications not enabled for this role" })
+    }
+
+    // SSE headers
+    res.set({
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    })
+    res.flushHeaders?.()
+
+    // Initial hello + keepalive
+    res.write(`event: hello\ndata: ${JSON.stringify({ ok: true, ts: Date.now() })}\n\n`)
+
+    addClient(role, res)
+    console.log(`[v0] SSE connected: role=${role}, user=${req.user._id}`)
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`event: ping\ndata: ${Date.now()}\n\n`)
+      } catch {
+        // no-op
+      }
+    }, 15000)
+
+    req.on("close", () => {
+      clearInterval(heartbeat)
+      removeClient(role, res)
+      console.log(`[v0] SSE disconnected: role=${role}, user=${req.user._id}`)
+      try {
+        res.end()
+      } catch {}
+    })
+  } catch (error) {
+    console.error("[v0] SSE error:", error)
+    try {
+      res.status(500).end()
+    } catch {}
   }
 })
 

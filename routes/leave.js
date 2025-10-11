@@ -4,6 +4,7 @@ const User = require("../models/User")
 const Notification = require("../models/Notification") // Import Notification model
 const jwt = require("jsonwebtoken")
 const router = express.Router()
+const { broadcastToRoles } = require("../realtime") // import realtime hub
 
 const auth = async (req, res, next) => {
   try {
@@ -62,6 +63,19 @@ router.post("/request", auth, async (req, res) => {
     })
     await notification.save()
     console.log("✅ Notification created for new leave request")
+
+    try {
+      broadcastToRoles(["admin", "manager", "hr"], {
+        _id: notification._id,
+        type: notification.type,
+        message: notification.message,
+        link: notification.link,
+        createdAt: notification.createdAt,
+      })
+      console.log("[v0] Realtime: broadcasted leave_request to admin/manager/hr")
+    } catch (e) {
+      console.log("[v0] Realtime broadcast (leave) failed:", e?.message)
+    }
 
     res.json({
       message: "Leave request submitted successfully",
