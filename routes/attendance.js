@@ -35,8 +35,8 @@ const managerAuth = (req, res, next) => {
 }
 
 // Helper function to get current date in YYYY-MM-DD format
-const getCurrentDate = () => {
-  const now = new Date()
+const getCurrentDate = (tzOffsetMinutes) => {
+  const now = getLocalNow(tzOffsetMinutes)
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, "0")
   const day = String(now.getDate()).padStart(2, "0")
@@ -44,22 +44,42 @@ const getCurrentDate = () => {
 }
 
 // Helper function to get current time in HH:MM:SS format
-const getCurrentTime = () => {
-  const now = new Date()
+const getCurrentTime = (tzOffsetMinutes) => {
+  const now = getLocalNow(tzOffsetMinutes)
   const hours = String(now.getHours()).padStart(2, "0")
   const minutes = String(now.getMinutes()).padStart(2, "0")
   const seconds = String(now.getSeconds()).padStart(2, "0")
   return `${hours}:${minutes}:${seconds}`
 }
 
+const getClientTzOffset = (req) => {
+  const hdr = req.headers["x-tz-offset-minutes"]
+  if (hdr === undefined) return null
+  const n = Number(hdr)
+  return Number.isFinite(n) ? n : null
+}
+
+// Given a timezone offset in minutes (as from Date#getTimezoneOffset),
+// return a Date object representing "now" in the client's local time.
+const getLocalNow = (tzOffsetMinutes) => {
+  const nowUtc = new Date()
+  if (typeof tzOffsetMinutes === "number" && !Number.isNaN(tzOffsetMinutes)) {
+    // Convert server-now (UTC-based) to client's local time by subtracting the offset
+    // Example: IST offset = -330 => now + 330 minutes
+    return new Date(nowUtc.getTime() - tzOffsetMinutes * 60 * 1000)
+  }
+  // Fallback to server local time (keeps old behavior for legacy clients)
+  return nowUtc
+}
+
 router.post("/checkin", auth, async (req, res) => {
   try {
-    const today = getCurrentDate()
+    const tzOffsetMinutes = getClientTzOffset(req)
+    const today = getCurrentDate(tzOffsetMinutes)
     const { location } = req.body
 
-    console.log("Check-in attempt for date:", today)
+    console.log("Check-in attempt for date:", today, "tzOffset:", tzOffsetMinutes)
 
-    // Check if user already has attendance record for today with check-in
     const exists = await Attendance.findOne({ user: req.user._id, date: today })
     if (exists && exists.checkIn) {
       return res.status(400).json({
@@ -68,11 +88,10 @@ router.post("/checkin", auth, async (req, res) => {
       })
     }
 
-    const checkInTime = getCurrentTime()
+    const checkInTime = getCurrentTime(tzOffsetMinutes)
 
     let attendance
     if (exists) {
-      // Update existing record
       exists.checkIn = checkInTime
       if (location) {
         exists.location = exists.location || {}
@@ -80,7 +99,6 @@ router.post("/checkin", auth, async (req, res) => {
       }
       attendance = await exists.save()
     } else {
-      // Create new record
       const locationData = {}
       if (location) {
         locationData.checkIn = JSON.stringify(location)
@@ -109,10 +127,11 @@ router.post("/checkin", auth, async (req, res) => {
 
 router.post("/checkout", auth, async (req, res) => {
   try {
-    const today = getCurrentDate()
+    const tzOffsetMinutes = getClientTzOffset(req)
+    const today = getCurrentDate(tzOffsetMinutes)
     const { location } = req.body
 
-    console.log("Check-out attempt for date:", today)
+    console.log("Check-out attempt for date:", today, "tzOffset:", tzOffsetMinutes)
 
     const record = await Attendance.findOne({ user: req.user._id, date: today })
     if (!record) {
@@ -130,7 +149,7 @@ router.post("/checkout", auth, async (req, res) => {
       })
     }
 
-    record.checkOut = getCurrentTime()
+    record.checkOut = getCurrentTime(tzOffsetMinutes)
     if (location) {
       record.location = record.location || {}
       record.location.checkOut = JSON.stringify(location)
@@ -151,8 +170,9 @@ router.post("/checkout", auth, async (req, res) => {
 
 router.get("/status", auth, async (req, res) => {
   try {
-    const today = getCurrentDate()
-    console.log("Getting status for date:", today)
+    const tzOffsetMinutes = getClientTzOffset(req)
+    const today = getCurrentDate(tzOffsetMinutes)
+    console.log("Getting status for date:", today, "tzOffset:", tzOffsetMinutes)
 
     const attendance = await Attendance.findOne({ user: req.user._id, date: today })
 
@@ -168,30 +188,25 @@ router.get("/status", auth, async (req, res) => {
   }
 })
 
-// Get attendance logs with single date filter
 router.get("/logs", auth, async (req, res) => {
   try {
+    const tzOffsetMinutes = getClientTzOffset(req)
     const { page = 1, limit = 10, userId, date } = req.query
-
-    // Get current date if no date specified
-    const today = getCurrentDate()
+    const today = getCurrentDate(tzOffsetMinutes)
     const targetDate = date || today
 
-    console.log("Fetching logs for date:", targetDate)
+    console.log("Fetching logs for date:", targetDate, "tzOffset:", tzOffsetMinutes)
 
     const query = {}
 
-    // Role-based access control
     if (req.user.role === "employee") {
       query.user = req.user._id
     } else if (userId) {
       query.user = userId
     }
 
-    // Always use specific date
     query.date = targetDate
 
-    // Get all active users for admin/manager view
     let allUsers = []
     if (req.user.role !== "employee") {
       const userQuery = { isActive: true }
@@ -201,18 +216,16 @@ router.get("/logs", auth, async (req, res) => {
       allUsers = await User.find(userQuery).select("_id name employeeId department position")
     }
 
-    // Get attendance records for the specific date
     const attendanceRecords = await Attendance.find(query)
       .populate("user", "name employeeId department position")
       .sort({ createdAt: -1 })
 
-    // Get leave records for the specific date
+    // Leave lookups use the provided date; no TZ change needed here.
     const leaveQuery = {
       status: "approved",
       startDate: { $lte: new Date(targetDate) },
       endDate: { $gte: new Date(targetDate) },
     }
-
     const leaveRecords = await Leave.find(leaveQuery).populate("user", "name employeeId department position")
 
     // Create comprehensive logs
@@ -303,29 +316,22 @@ router.get("/logs", auth, async (req, res) => {
 // FIXED: Stats calculation with proper date range and working hours
 router.get("/stats", auth, async (req, res) => {
   try {
+    const tzOffsetMinutes = getClientTzOffset(req)
     const { month, year } = req.query
-    const currentDate = new Date()
-    const targetMonth = month || currentDate.getMonth() + 1
-    const targetYear = year || currentDate.getFullYear()
+    const localNow = getLocalNow(tzOffsetMinutes)
+    const targetMonth = Number(month) || localNow.getMonth() + 1
+    const targetYear = Number(year) || localNow.getFullYear()
 
-    console.log(`Calculating stats for ${targetYear}-${targetMonth}`)
+    console.log(`Calculating stats for ${targetYear}-${targetMonth} tzOffset:`, tzOffsetMinutes)
 
-    // Always get stats for the current user only
     const query = { user: req.user._id }
-
-    // FIXED: Get stats for the specified month with proper date range
     const startDate = `${targetYear}-${String(targetMonth).padStart(2, "0")}-01`
     const lastDay = new Date(targetYear, targetMonth, 0).getDate()
     const endDate = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
-
     query.date = { $gte: startDate, $lte: endDate }
 
-    console.log(`Date range: ${startDate} to ${endDate}`)
-
     const attendanceRecords = await Attendance.find(query)
-    console.log(`Found ${attendanceRecords.length} attendance records`)
 
-    // FIXED: Calculate stats properly
     const stats = {
       totalDays: attendanceRecords.length,
       presentDays: attendanceRecords.filter((r) => r.checkIn).length,
@@ -334,23 +340,16 @@ router.get("/stats", auth, async (req, res) => {
       lateCount: 0,
     }
 
-    // Calculate total working hours
     attendanceRecords.forEach((record) => {
       if (record.workingHours && record.workingHours > 0) {
         stats.totalHours += record.workingHours
-        console.log(`Adding ${record.workingHours}h from ${record.date}`)
       }
     })
 
-    // Round total hours to 2 decimal places
     stats.totalHours = Math.round(stats.totalHours * 100) / 100
-
-    // Calculate average hours per present day
     if (stats.presentDays > 0) {
       stats.averageHours = Math.round((stats.totalHours / stats.presentDays) * 100) / 100
     }
-
-    console.log("Final stats:", stats)
 
     res.json(stats)
   } catch (error) {
