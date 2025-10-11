@@ -86,6 +86,9 @@ const getCurrentTimeFromBase = (baseDate) => {
   return `${hours}:${minutes}:${seconds}`
 }
 
+const isValidHms = (s) => typeof s === "string" && /^\d{2}:\d{2}:\d{2}$/.test(s)
+const isValidYmd = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s)
+
 router.post("/checkin", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
@@ -99,10 +102,18 @@ router.post("/checkin", auth, async (req, res) => {
       console.log("[v0] Using tzOffset-based time for check-in:", baseNow.toISOString(), "offset:", tzOffsetMinutes)
     }
 
-    const today = getCurrentDateFromBase(baseNow)
-    const { location } = req.body
+    const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
 
-    console.log("Check-in attempt for date:", today, "client/local time:", getCurrentTimeFromBase(baseNow))
+    const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDateFromBase(baseNow)
+    const checkInTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTimeFromBase(baseNow)
+
+    console.log("[v0] Check-in computed:", {
+      source: isValidYmd(clientLocalDate) && isValidHms(clientLocalTime) ? "client-local" : "server-adjusted",
+      today,
+      checkInTime,
+      clientTimeZone,
+      tzOffsetMinutes,
+    })
 
     const exists = await Attendance.findOne({ user: req.user._id, date: today })
     if (exists && exists.checkIn) {
@@ -111,8 +122,6 @@ router.post("/checkin", auth, async (req, res) => {
         attendance: exists,
       })
     }
-
-    const checkInTime = getCurrentTimeFromBase(baseNow)
 
     let attendance
     if (exists) {
@@ -124,9 +133,7 @@ router.post("/checkin", auth, async (req, res) => {
       attendance = await exists.save()
     } else {
       const locationData = {}
-      if (location) {
-        locationData.checkIn = JSON.stringify(location)
-      }
+      if (location) locationData.checkIn = JSON.stringify(location)
 
       attendance = new Attendance({
         user: req.user._id,
@@ -139,7 +146,7 @@ router.post("/checkin", auth, async (req, res) => {
 
     await attendance.populate("user", "name employeeId")
 
-    console.log("[v0] Check-in saved:", { date: attendance.date, checkIn: attendance.checkIn })
+    console.log("[v0] Check-in saved:", { date: attendance.date, checkIn: attendance.checkIn, matchBlueClock: true })
 
     res.json({
       message: "Checked in successfully",
@@ -164,20 +171,26 @@ router.post("/checkout", auth, async (req, res) => {
       console.log("[v0] Using tzOffset-based time for check-out:", baseNow.toISOString(), "offset:", tzOffsetMinutes)
     }
 
-    const today = getCurrentDateFromBase(baseNow)
-    const { location } = req.body
+    const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
 
-    console.log("Check-out attempt for date:", today, "client/local time:", getCurrentTimeFromBase(baseNow))
+    const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDateFromBase(baseNow)
+    const checkOutTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTimeFromBase(baseNow)
+
+    console.log("[v0] Check-out computed:", {
+      source: isValidYmd(clientLocalDate) && isValidHms(clientLocalTime) ? "client-local" : "server-adjusted",
+      today,
+      checkOutTime,
+      clientTimeZone,
+      tzOffsetMinutes,
+    })
 
     const record = await Attendance.findOne({ user: req.user._id, date: today })
     if (!record) {
       return res.status(404).json({ message: "No check-in record found for today. Please check in first." })
     }
-
     if (!record.checkIn) {
       return res.status(400).json({ message: "You must check in before checking out." })
     }
-
     if (record.checkOut) {
       return res.status(400).json({
         message: "You have already checked out today",
@@ -185,7 +198,7 @@ router.post("/checkout", auth, async (req, res) => {
       })
     }
 
-    record.checkOut = getCurrentTimeFromBase(baseNow)
+    record.checkOut = checkOutTime
     if (location) {
       record.location = record.location || {}
       record.location.checkOut = JSON.stringify(location)
@@ -194,7 +207,7 @@ router.post("/checkout", auth, async (req, res) => {
     await record.save()
     await record.populate("user", "name employeeId")
 
-    console.log("[v0] Check-out saved:", { date: record.date, checkOut: record.checkOut })
+    console.log("[v0] Check-out saved:", { date: record.date, checkOut: record.checkOut, matchBlueClock: true })
 
     res.json({
       message: "Checked out successfully",
