@@ -408,6 +408,32 @@ router.post("/forgot-password", async (req, res) => {
     console.log("- EMAIL_PASS:", process.env.EMAIL_PASS ? "SET" : "NOT SET")
     console.log("- FRONTEND_URL:", process.env.FRONTEND_URL || "NOT SET")
 
+    // Robustly resolve the frontend base URL for password reset links
+    const resolveFrontendBaseUrl = (req) => {
+      // 1) Explicit config takes priority
+      const configured = process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim()
+      if (configured) {
+        return configured.replace(/\/+$/, "")
+      }
+
+      // 2) Vercel deployment URL fallback (e.g., "my-app.vercel.app")
+      const vercelUrlRaw = process.env.VERCEL_URL && process.env.VERCEL_URL.trim()
+      if (vercelUrlRaw) {
+        const vercelUrl = vercelUrlRaw.startsWith("http") ? vercelUrlRaw : `https://${vercelUrlRaw}`
+        return vercelUrl.replace(/\/+$/, "")
+      }
+
+      // 3) Try to infer from request headers behind proxies
+      const proto = (req.headers["x-forwarded-proto"] || "https").toString().split(",")[0]
+      const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString().split(",")[0].trim()
+      if (host) {
+        return `${proto}://${host}`
+      }
+
+      // 4) Local dev default (Vite)
+      return "http://localhost:5173"
+    }
+
     // Check if user exists and is active
     console.log("Searching for user...")
     const user = await User.findOne({
@@ -453,6 +479,10 @@ router.post("/forgot-password", async (req, res) => {
     user.resetPasswordExpiry = resetTokenExpiry
     await user.save()
     console.log("✅ Reset token saved to database")
+
+    const frontendBase = resolveFrontendBaseUrl(req)
+    const resetUrl = `${frontendBase}/reset-password?token=${resetToken}`
+    console.log("[v0] Password reset URL built:", resetUrl)
 
     // Create email transporter with better configuration
     console.log("Creating email transporter...")
@@ -501,8 +531,6 @@ router.post("/forgot-password", async (req, res) => {
     }
 
     // Send the email
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`
-
     const mailOptions = {
       from: {
         name: "Employee Attendance System",
