@@ -72,13 +72,37 @@ const getLocalNow = (tzOffsetMinutes) => {
   return nowUtc
 }
 
+const getCurrentDateFromBase = (baseDate) => {
+  const year = baseDate.getFullYear()
+  const month = String(baseDate.getMonth() + 1).padStart(2, "0")
+  const day = String(baseDate.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const getCurrentTimeFromBase = (baseDate) => {
+  const hours = String(baseDate.getHours()).padStart(2, "0")
+  const minutes = String(baseDate.getMinutes()).padStart(2, "0")
+  const seconds = String(baseDate.getSeconds()).padStart(2, "0")
+  return `${hours}:${minutes}:${seconds}`
+}
+
 router.post("/checkin", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
-    const today = getCurrentDate(tzOffsetMinutes)
+
+    let baseNow = null
+    if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
+      baseNow = new Date(Number(req.body.clientTimestamp))
+      console.log("[v0] Using clientTimestamp for check-in:", baseNow.toISOString())
+    } else {
+      baseNow = getLocalNow(tzOffsetMinutes)
+      console.log("[v0] Using tzOffset-based time for check-in:", baseNow.toISOString(), "offset:", tzOffsetMinutes)
+    }
+
+    const today = getCurrentDateFromBase(baseNow)
     const { location } = req.body
 
-    console.log("Check-in attempt for date:", today, "tzOffset:", tzOffsetMinutes)
+    console.log("Check-in attempt for date:", today, "client/local time:", getCurrentTimeFromBase(baseNow))
 
     const exists = await Attendance.findOne({ user: req.user._id, date: today })
     if (exists && exists.checkIn) {
@@ -88,7 +112,7 @@ router.post("/checkin", auth, async (req, res) => {
       })
     }
 
-    const checkInTime = getCurrentTime(tzOffsetMinutes)
+    const checkInTime = getCurrentTimeFromBase(baseNow)
 
     let attendance
     if (exists) {
@@ -115,6 +139,8 @@ router.post("/checkin", auth, async (req, res) => {
 
     await attendance.populate("user", "name employeeId")
 
+    console.log("[v0] Check-in saved:", { date: attendance.date, checkIn: attendance.checkIn })
+
     res.json({
       message: "Checked in successfully",
       attendance,
@@ -128,10 +154,20 @@ router.post("/checkin", auth, async (req, res) => {
 router.post("/checkout", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
-    const today = getCurrentDate(tzOffsetMinutes)
+
+    let baseNow = null
+    if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
+      baseNow = new Date(Number(req.body.clientTimestamp))
+      console.log("[v0] Using clientTimestamp for check-out:", baseNow.toISOString())
+    } else {
+      baseNow = getLocalNow(tzOffsetMinutes)
+      console.log("[v0] Using tzOffset-based time for check-out:", baseNow.toISOString(), "offset:", tzOffsetMinutes)
+    }
+
+    const today = getCurrentDateFromBase(baseNow)
     const { location } = req.body
 
-    console.log("Check-out attempt for date:", today, "tzOffset:", tzOffsetMinutes)
+    console.log("Check-out attempt for date:", today, "client/local time:", getCurrentTimeFromBase(baseNow))
 
     const record = await Attendance.findOne({ user: req.user._id, date: today })
     if (!record) {
@@ -149,7 +185,7 @@ router.post("/checkout", auth, async (req, res) => {
       })
     }
 
-    record.checkOut = getCurrentTime(tzOffsetMinutes)
+    record.checkOut = getCurrentTimeFromBase(baseNow)
     if (location) {
       record.location = record.location || {}
       record.location.checkOut = JSON.stringify(location)
@@ -157,6 +193,8 @@ router.post("/checkout", auth, async (req, res) => {
 
     await record.save()
     await record.populate("user", "name employeeId")
+
+    console.log("[v0] Check-out saved:", { date: record.date, checkOut: record.checkOut })
 
     res.json({
       message: "Checked out successfully",
