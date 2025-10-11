@@ -396,7 +396,6 @@ router.post("/forgot-password", async (req, res) => {
     console.log("=== FORGOT PASSWORD REQUEST START ===")
 
     const { email } = req.body
-
     if (!email) {
       console.log("❌ No email provided")
       return res.status(400).json({ error: "Email is required" })
@@ -408,30 +407,20 @@ router.post("/forgot-password", async (req, res) => {
     console.log("- EMAIL_PASS:", process.env.EMAIL_PASS ? "SET" : "NOT SET")
     console.log("- FRONTEND_URL:", process.env.FRONTEND_URL || "NOT SET")
 
-    // Robustly resolve the frontend base URL for password reset links
-    const resolveFrontendBaseUrl = (req) => {
-      // 1) Explicit config takes priority
-      const configured = process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim()
-      if (configured) {
-        return configured.replace(/\/+$/, "")
+    const resolveFrontendBaseUrl = () => {
+      const explicit = (process.env.FRONTEND_URL || "").trim()
+      if (explicit) {
+        console.log("[v0] Using explicit FRONTEND_URL:", explicit)
+        return explicit.replace(/\/+$/, "")
       }
-
-      // 2) Vercel deployment URL fallback (e.g., "my-app.vercel.app")
-      const vercelUrlRaw = process.env.VERCEL_URL && process.env.VERCEL_URL.trim()
-      if (vercelUrlRaw) {
-        const vercelUrl = vercelUrlRaw.startsWith("http") ? vercelUrlRaw : `https://${vercelUrlRaw}`
-        return vercelUrl.replace(/\/+$/, "")
+      if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+        const prod = "https://attendance-system-client-nine.vercel.app"
+        console.log("[v0] Using production frontend URL:", prod)
+        return prod
       }
-
-      // 3) Try to infer from request headers behind proxies
-      const proto = (req.headers["x-forwarded-proto"] || "https").toString().split(",")[0]
-      const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString().split(",")[0].trim()
-      if (host) {
-        return `${proto}://${host}`
-      }
-
-      // 4) Local dev default (Vite)
-      return "http://localhost:5173"
+      const dev = "http://localhost:5173"
+      console.log("[v0] Using development frontend URL:", dev)
+      return dev
     }
 
     // Check if user exists and is active
@@ -440,15 +429,12 @@ router.post("/forgot-password", async (req, res) => {
       email: { $regex: new RegExp(`^${email}$`, "i") },
       isActive: true,
     })
-
     if (!user) {
       console.log("❌ No user found with email:", email)
       return res.status(404).json({
         error: "Sorry, no user exists with this email address. Please check the email and try again.",
       })
     }
-
-    console.log("✅ User found:", user.name, "(" + user.email + ")")
 
     // Check if email is configured - REQUIRED for security
     const emailConfigured =
@@ -467,20 +453,14 @@ router.post("/forgot-password", async (req, res) => {
       })
     }
 
-    // Generate reset token
-    console.log("Generating reset token...")
+    // Generate and save reset token
     const resetToken = crypto.randomBytes(32).toString("hex")
     const resetTokenExpiry = Date.now() + 3600000 // 1 hour
-
-    console.log("Reset token generated:", resetToken.substring(0, 10) + "...")
-
-    // Save reset token to user
     user.resetPasswordToken = resetToken
     user.resetPasswordExpiry = resetTokenExpiry
     await user.save()
-    console.log("✅ Reset token saved to database")
 
-    const frontendBase = resolveFrontendBaseUrl(req)
+    const frontendBase = resolveFrontendBaseUrl()
     const resetUrl = `${frontendBase}/reset-password?token=${resetToken}`
     console.log("[v0] Password reset URL built:", resetUrl)
 
