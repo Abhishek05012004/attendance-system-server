@@ -33,6 +33,11 @@ const attendanceSchema = new mongoose.Schema(
       enum: ["present", "absent", "late", "half_day"],
       default: "present",
     },
+    face: {
+      checkIn: { type: [Number], default: undefined },
+      checkOut: { type: [Number], default: undefined },
+      version: { type: String, default: "face-api-0.22.2" },
+    },
   },
   {
     timestamps: true,

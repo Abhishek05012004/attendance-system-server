@@ -99,11 +99,14 @@ const euclidean = (a = [], b = []) => {
   }
   return Math.sqrt(s)
 }
-const verifyFaceIfRequired = (user, embedding) => {
-  if (!user.faceEnrolled) return { ok: false, status: 412, message: "Please enroll your face before checking in/out." }
+
+const verifyFaceOrReject = (user, embedding) => {
+  if (!user.faceEnrolled || !Array.isArray(user.faceEmbedding) || !user.faceEmbedding.length) {
+    return { ok: false, status: 412, message: "Please enroll your face before checking in/out." }
+  }
   if (!Array.isArray(embedding)) return { ok: false, status: 400, message: "Face data missing. Please try again." }
-  const distance = euclidean(embedding, user.faceEmbedding || [])
   const threshold = 0.6
+  const distance = euclidean(embedding, user.faceEmbedding || [])
   if (distance <= threshold) return { ok: true }
   return { ok: false, status: 401, message: "Face did not match. Please try again." }
 }
@@ -112,11 +115,8 @@ router.post("/checkin", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
 
-    // Enforce face verification
-    if (req.user?.faceEnrolled) {
-      const verdict = verifyFaceIfRequired(req.user, req.body.faceEmbedding)
-      if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
-    }
+    const verdict = verifyFaceOrReject(req.user, req.body.faceEmbedding)
+    if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
 
     let baseNow = null
     if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
@@ -151,6 +151,9 @@ router.post("/checkin", auth, async (req, res) => {
     let attendance
     if (exists) {
       exists.checkIn = checkInTime
+      exists.face = exists.face || {}
+      exists.face.checkIn = req.body.faceEmbedding?.map(Number)
+      exists.face.version = "face-api-0.22.2"
       if (location) {
         exists.location = exists.location || {}
         exists.location.checkIn = JSON.stringify(location)
@@ -165,12 +168,15 @@ router.post("/checkin", auth, async (req, res) => {
         date: today,
         checkIn: checkInTime,
         location: locationData,
+        face: {
+          checkIn: req.body.faceEmbedding?.map(Number),
+          version: "face-api-0.22.2",
+        },
       })
       await attendance.save()
     }
 
     await attendance.populate("user", "name employeeId")
-
     console.log("[v0] Check-in saved:", { date: attendance.date, checkIn: attendance.checkIn, matchBlueClock: true })
 
     res.json({
@@ -187,11 +193,8 @@ router.post("/checkout", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
 
-    // Enforce face verification
-    if (req.user?.faceEnrolled) {
-      const verdict = verifyFaceIfRequired(req.user, req.body.faceEmbedding)
-      if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
-    }
+    const verdict = verifyFaceOrReject(req.user, req.body.faceEmbedding)
+    if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
 
     let baseNow = null
     if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
@@ -229,7 +232,21 @@ router.post("/checkout", auth, async (req, res) => {
       })
     }
 
+    if (Array.isArray(record?.face?.checkIn) && Array.isArray(req.body.faceEmbedding)) {
+      const d = euclidean(record.face.checkIn, req.body.faceEmbedding)
+      const SAME_FACE_THRESHOLD = 0.6
+      if (!(d <= SAME_FACE_THRESHOLD)) {
+        return res
+          .status(401)
+          .json({ message: "Checkout denied: the face does not match the one used at check-in. Please try again." })
+      }
+    }
+
     record.checkOut = checkOutTime
+    record.face = record.face || {}
+    record.face.checkOut = req.body.faceEmbedding?.map(Number)
+    record.face.version = record.face.version || "face-api-0.22.2"
+
     if (location) {
       record.location = record.location || {}
       record.location.checkOut = JSON.stringify(location)

@@ -41,9 +41,41 @@ const adminAuth = (req, res, next) => {
   next()
 }
 
+const euclidean = (a = [], b = []) => {
+  if (!a?.length || !b?.length || a.length !== b.length) return Number.POSITIVE_INFINITY
+  let s = 0
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i]
+    s += d * d
+  }
+  return Math.sqrt(s)
+}
+
+async function findFaceOwner(embedding) {
+  const users = await User.find({ faceEnrolled: true }).select("_id faceEmbedding name email")
+  let best = { userId: null, distance: Number.POSITIVE_INFINITY }
+  for (const u of users) {
+    const d = euclidean(embedding, u.faceEmbedding || [])
+    if (d < best.distance) best = { userId: u._id, distance: d }
+  }
+  return best
+}
+
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, department, position, phone, address, role, adminCode } = req.body
+    const {
+      name,
+      email,
+      password,
+      department,
+      position,
+      phone,
+      address,
+      role,
+      adminCode,
+      faceEmbedding,
+      faceModelVersion,
+    } = req.body
 
     console.log("=== REGISTRATION REQUEST ===")
     console.log("Data received:", { name, email, department, position, phone, address, role })
@@ -88,6 +120,20 @@ router.post("/register", async (req, res) => {
       }
     }
 
+    let reqFaceEmbedding
+    if (Array.isArray(faceEmbedding) && faceEmbedding.length >= 64) {
+      const UNIQUE_THRESHOLD = 0.45
+      const match = await findFaceOwner(faceEmbedding)
+      if (match.userId && match.distance <= UNIQUE_THRESHOLD) {
+        return res.status(409).json({
+          error: "This face is already linked to another employee account. Registration blocked.",
+          code: "FACE_ALREADY_LINKED",
+          distance: match.distance,
+        })
+      }
+      reqFaceEmbedding = faceEmbedding.map(Number)
+    }
+
     // Create registration request (not a user yet)
     const registrationRequest = new RegistrationRequest({
       name,
@@ -100,6 +146,9 @@ router.post("/register", async (req, res) => {
       role: role || "employee",
       adminCode,
       status: "pending",
+      ...(reqFaceEmbedding
+        ? { faceEmbedding: reqFaceEmbedding, faceModelVersion: faceModelVersion || "face-api-0.22.2" }
+        : {}),
     })
 
     await registrationRequest.save()
@@ -199,6 +248,22 @@ router.post("/approve-registration/:requestId", auth, adminAuth, async (req, res
       return res.status(400).json({ error: "User with this email already exists" })
     }
 
+    const faceEmbeddingToUse = Array.isArray(registrationRequest.faceEmbedding)
+      ? registrationRequest.faceEmbedding.map(Number)
+      : undefined
+    if (faceEmbeddingToUse?.length >= 64) {
+      const UNIQUE_THRESHOLD = 0.45
+      const match = await findFaceOwner(faceEmbeddingToUse)
+      if (match.userId && match.distance <= UNIQUE_THRESHOLD) {
+        return res.status(409).json({
+          error:
+            "Approval blocked: this face is already linked to another account. Ask the requester to contact the admin.",
+          code: "FACE_ALREADY_LINKED",
+          distance: match.distance,
+        })
+      }
+    }
+
     // Generate employee ID
     const employeeId = await generateEmployeeId()
 
@@ -214,6 +279,13 @@ router.post("/approve-registration/:requestId", auth, adminAuth, async (req, res
       address: registrationRequest.address,
       role: registrationRequest.role,
       isActive: true,
+      ...(faceEmbeddingToUse
+        ? {
+            faceEmbedding: faceEmbeddingToUse,
+            faceEnrolled: true,
+            faceModelVersion: registrationRequest.faceModelVersion || "face-api-0.22.2",
+          }
+        : {}),
     })
 
     await user.save()

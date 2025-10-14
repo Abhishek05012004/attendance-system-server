@@ -27,6 +27,18 @@ const euclidean = (a = [], b = []) => {
   return Math.sqrt(s)
 }
 
+// Helper to find if this face is already used by another user
+async function findFaceOwner(embedding, excludeUserId) {
+  const others = await User.find({ faceEnrolled: true }).select("_id faceEmbedding name email")
+  let best = { userId: null, distance: Number.POSITIVE_INFINITY }
+  for (const u of others) {
+    if (excludeUserId && String(u._id) === String(excludeUserId)) continue
+    const d = euclidean(embedding, u.faceEmbedding || [])
+    if (d < best.distance) best = { userId: u._id, distance: d }
+  }
+  return best
+}
+
 // Enroll face embedding
 router.post("/enroll", auth, async (req, res) => {
   try {
@@ -34,6 +46,18 @@ router.post("/enroll", auth, async (req, res) => {
     if (!Array.isArray(embedding) || embedding.length < 64) {
       return res.status(400).json({ error: "Invalid embedding" })
     }
+
+    // Do not allow the same face to be linked to multiple accounts
+    const UNIQUE_THRESHOLD = 0.45 // stricter than verify threshold
+    const { userId: ownerId, distance } = await findFaceOwner(embedding, req.user._id)
+    if (ownerId && distance <= UNIQUE_THRESHOLD) {
+      return res.status(409).json({
+        error: "This face is already linked to another account. Please contact admin.",
+        code: "FACE_ALREADY_LINKED",
+        distance,
+      })
+    }
+
     req.user.faceEmbedding = embedding.map(Number)
     req.user.faceEnrolled = true
     req.user.faceModelVersion = modelVersion
