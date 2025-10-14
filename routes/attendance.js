@@ -89,9 +89,34 @@ const getCurrentTimeFromBase = (baseDate) => {
 const isValidHms = (s) => typeof s === "string" && /^\d{2}:\d{2}:\d{2}$/.test(s)
 const isValidYmd = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s)
 
+// Add face verification helper
+const euclidean = (a = [], b = []) => {
+  if (!a?.length || !b?.length || a.length !== b.length) return Number.POSITIVE_INFINITY
+  let s = 0
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i]
+    s += d * d
+  }
+  return Math.sqrt(s)
+}
+const verifyFaceIfRequired = (user, embedding) => {
+  if (!user.faceEnrolled) return { ok: false, status: 412, message: "Please enroll your face before checking in/out." }
+  if (!Array.isArray(embedding)) return { ok: false, status: 400, message: "Face data missing. Please try again." }
+  const distance = euclidean(embedding, user.faceEmbedding || [])
+  const threshold = 0.6
+  if (distance <= threshold) return { ok: true }
+  return { ok: false, status: 401, message: "Face did not match. Please try again." }
+}
+
 router.post("/checkin", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
+
+    // Enforce face verification
+    if (req.user?.faceEnrolled) {
+      const verdict = verifyFaceIfRequired(req.user, req.body.faceEmbedding)
+      if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
+    }
 
     let baseNow = null
     if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
@@ -161,6 +186,12 @@ router.post("/checkin", auth, async (req, res) => {
 router.post("/checkout", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
+
+    // Enforce face verification
+    if (req.user?.faceEnrolled) {
+      const verdict = verifyFaceIfRequired(req.user, req.body.faceEmbedding)
+      if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
+    }
 
     let baseNow = null
     if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {

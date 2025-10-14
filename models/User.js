@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
     // Password reset fields
     resetPasswordToken: String,
     resetPasswordExpiry: Date,
+    // Face recognition fields
     faceEmbedding: { type: [Number], default: undefined }, // 128-d descriptor
     faceEnrolled: { type: Boolean, default: false },
     faceModelVersion: { type: String, default: "face-api-0.22.2" },

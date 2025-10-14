@@ -20,6 +20,8 @@ const registrationRequestSchema = new mongoose.Schema(
     reviewedAt: Date,
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     rejectionReason: String,
+    faceEmbedding: { type: [Number], default: undefined },
+    faceModelVersion: { type: String, default: "face-api-0.22.2" },
   },
   {
     timestamps: true,
