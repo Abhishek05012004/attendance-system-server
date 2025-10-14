@@ -122,15 +122,6 @@ router.post("/register", async (req, res) => {
 
     let reqFaceEmbedding
     if (Array.isArray(faceEmbedding) && faceEmbedding.length >= 64) {
-      const UNIQUE_THRESHOLD = 0.45
-      const match = await findFaceOwner(faceEmbedding)
-      if (match.userId && match.distance <= UNIQUE_THRESHOLD) {
-        return res.status(409).json({
-          error: "This face is already linked to another employee account. Registration blocked.",
-          code: "FACE_ALREADY_LINKED",
-          distance: match.distance,
-        })
-      }
       reqFaceEmbedding = faceEmbedding.map(Number)
     }
 
@@ -251,18 +242,6 @@ router.post("/approve-registration/:requestId", auth, adminAuth, async (req, res
     const faceEmbeddingToUse = Array.isArray(registrationRequest.faceEmbedding)
       ? registrationRequest.faceEmbedding.map(Number)
       : undefined
-    if (faceEmbeddingToUse?.length >= 64) {
-      const UNIQUE_THRESHOLD = 0.45
-      const match = await findFaceOwner(faceEmbeddingToUse)
-      if (match.userId && match.distance <= UNIQUE_THRESHOLD) {
-        return res.status(409).json({
-          error:
-            "Approval blocked: this face is already linked to another account. Ask the requester to contact the admin.",
-          code: "FACE_ALREADY_LINKED",
-          distance: match.distance,
-        })
-      }
-    }
 
     // Generate employee ID
     const employeeId = await generateEmployeeId()

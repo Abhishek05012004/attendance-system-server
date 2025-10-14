@@ -47,16 +47,9 @@ router.post("/enroll", auth, async (req, res) => {
       return res.status(400).json({ error: "Invalid embedding" })
     }
 
-    // Do not allow the same face to be linked to multiple accounts
-    const UNIQUE_THRESHOLD = 0.45 // stricter than verify threshold
-    const { userId: ownerId, distance } = await findFaceOwner(embedding, req.user._id)
-    if (ownerId && distance <= UNIQUE_THRESHOLD) {
-      return res.status(409).json({
-        error: "This face is already linked to another account. Please contact admin.",
-        code: "FACE_ALREADY_LINKED",
-        distance,
-      })
-    }
+    // NOTE: Previously we blocked faces already used by other accounts.
+    // Requirement change: allow the same face to be enrolled to multiple login IDs.
+    // Hence, we skip the global uniqueness check here.
 
     req.user.faceEmbedding = embedding.map(Number)
     req.user.faceEnrolled = true
@@ -64,9 +57,9 @@ router.post("/enroll", auth, async (req, res) => {
     await req.user.save()
     const safe = req.user.toObject()
     delete safe.password
-    res.json({ message: "Face enrolled successfully", user: safe })
+    return res.json({ message: "Face enrolled successfully", user: safe })
   } catch (e) {
-    res.status(500).json({ error: e.message })
+    return res.status(500).json({ error: e.message })
   }
 })
 

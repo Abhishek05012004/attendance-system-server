@@ -100,15 +100,10 @@ const euclidean = (a = [], b = []) => {
   return Math.sqrt(s)
 }
 
-const verifyFaceOrReject = (user, embedding) => {
-  if (!user.faceEnrolled || !Array.isArray(user.faceEmbedding) || !user.faceEmbedding.length) {
-    return { ok: false, status: 412, message: "Please enroll your face before checking in/out." }
-  }
-  if (!Array.isArray(embedding)) return { ok: false, status: 400, message: "Face data missing. Please try again." }
-  const threshold = 0.6
-  const distance = euclidean(embedding, user.faceEmbedding || [])
-  if (distance <= threshold) return { ok: true }
-  return { ok: false, status: 401, message: "Face did not match. Please try again." }
+const verifyFaceMatch = (embedding, enrolled, threshold = 0.6) => {
+  if (!Array.isArray(embedding) || !embedding.length) return false
+  if (!Array.isArray(enrolled) || !enrolled.length) return false
+  return euclidean(embedding, enrolled) <= threshold
 }
 
 async function findFaceOwner(embedding, excludeUserId) {
@@ -122,47 +117,43 @@ async function findFaceOwner(embedding, excludeUserId) {
   return best
 }
 
+const _euclid = (a = [], b = []) => {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return Number.POSITIVE_INFINITY
+  let s = 0
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i]
+    s += d * d
+  }
+  return Math.sqrt(s)
+}
+const _matches = (probe = [], enrolled = [], t = 0.6) => _euclid(probe, enrolled) <= t
+
 router.post("/checkin", auth, async (req, res) => {
   try {
-    const tzOffsetMinutes = getClientTzOffset(req)
+    const faceEmbedding = req.body?.faceEmbedding
+    if (!Array.isArray(faceEmbedding) || faceEmbedding.length < 64) {
+      return res.status(400).json({ message: "Face data is required for check-in." })
+    }
 
-    const incomingEmbedding = req.body.faceEmbedding
-    if (!req.user.faceEnrolled) {
-      if (!Array.isArray(incomingEmbedding) || incomingEmbedding.length < 64) {
-        return res.status(412).json({ message: "Please enroll your face before checking in." })
-      }
-      const UNIQUE_THRESHOLD = 0.45
-      const { userId: ownerId, distance } = await findFaceOwner(incomingEmbedding, req.user._id)
-      if (ownerId && distance <= UNIQUE_THRESHOLD) {
-        return res.status(409).json({
-          message: "This face is already linked to another account. Contact admin.",
-          code: "FACE_ALREADY_LINKED",
-        })
-      }
-      // Save face to current user
-      req.user.faceEmbedding = incomingEmbedding.map(Number)
+    if (!req.user.faceEnrolled || !Array.isArray(req.user.faceEmbedding) || !req.user.faceEmbedding.length) {
+      // Inline enroll then proceed with check-in
+      req.user.faceEmbedding = faceEmbedding.map(Number)
       req.user.faceEnrolled = true
       req.user.faceModelVersion = "face-api-0.22.2"
       await req.user.save()
     } else {
-      // Existing users: enforce face verification strictly
-      const verdict = verifyFaceOrReject(req.user, incomingEmbedding)
-      if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
+      // Verify against enrolled face
+      if (!_matches(faceEmbedding, req.user.faceEmbedding, 0.6)) {
+        return res.status(401).json({ message: "Face did not match your enrolled face." })
+      }
     }
 
-    let baseNow = null
-    if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
-      baseNow = new Date(Number(req.body.clientTimestamp))
-      console.log("[v0] Using clientTimestamp for check-in:", baseNow.toISOString())
-    } else {
-      baseNow = getLocalNow(tzOffsetMinutes)
-      console.log("[v0] Using tzOffset-based time for check-in:", baseNow.toISOString(), "offset:", tzOffsetMinutes)
-    }
+    const tzOffsetMinutes = getClientTzOffset(req)
 
     const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
 
-    const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDateFromBase(baseNow)
-    const checkInTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTimeFromBase(baseNow)
+    const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDate(tzOffsetMinutes)
+    const checkInTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTime(tzOffsetMinutes)
 
     console.log("[v0] Check-in computed:", {
       source: isValidYmd(clientLocalDate) && isValidHms(clientLocalTime) ? "client-local" : "server-adjusted",
@@ -172,130 +163,79 @@ router.post("/checkin", auth, async (req, res) => {
       tzOffsetMinutes,
     })
 
-    const exists = await Attendance.findOne({ user: req.user._id, date: today })
-    if (exists && exists.checkIn) {
-      return res.status(400).json({
-        message: "You have already checked in today",
-        attendance: exists,
-      })
+    let attendance = await Attendance.findOne({ user: req.user._id, date: today })
+    if (attendance?.checkIn) {
+      return res.status(400).json({ message: "You have already checked in today", attendance })
     }
 
-    let attendance
-    if (exists) {
-      exists.checkIn = checkInTime
-      exists.face = exists.face || {}
-      exists.face.checkIn = incomingEmbedding?.map(Number)
-      exists.face.version = "face-api-0.22.2"
-      if (location) {
-        exists.location = exists.location || {}
-        exists.location.checkIn = JSON.stringify(location)
-      }
-      attendance = await exists.save()
-    } else {
-      const locationData = {}
-      if (location) locationData.checkIn = JSON.stringify(location)
-
-      attendance = new Attendance({
-        user: req.user._id,
-        date: today,
-        checkIn: checkInTime,
-        location: locationData,
-        face: {
-          checkIn: incomingEmbedding?.map(Number),
-          version: "face-api-0.22.2",
-        },
-      })
-      await attendance.save()
+    if (!attendance) {
+      attendance = new Attendance({ user: req.user._id, date: today })
     }
 
+    attendance.checkIn = checkInTime
+    attendance.face = attendance.face || {}
+    attendance.face.checkIn = faceEmbedding.map(Number)
+    attendance.face.version = "face-api-0.22.2"
+    attendance.checkInFaceEmbedding = faceEmbedding.map(Number)
+    if (location) {
+      attendance.location = attendance.location || {}
+      attendance.location.checkIn = JSON.stringify(location)
+    }
+    await attendance.save()
     await attendance.populate("user", "name employeeId")
-    console.log("[v0] Check-in saved:", { date: attendance.date, checkIn: attendance.checkIn, matchBlueClock: true })
 
-    res.json({
-      message: "Checked in successfully",
-      attendance,
-    })
+    return res.status(200).json({ message: "Checked in successfully.", attendance })
   } catch (error) {
     console.error("Check-in error:", error)
-    res.status(500).json({ error: "Failed to check in. Please try again." })
+    return res.status(500).json({ error: "Failed to check in. Please try again." })
   }
 })
 
 router.post("/checkout", auth, async (req, res) => {
   try {
+    const faceEmbedding = req.body?.faceEmbedding
+    if (!Array.isArray(faceEmbedding) || faceEmbedding.length < 64) {
+      return res.status(400).json({ message: "Face data is required for check-out." })
+    }
+
+    if (!req.user.faceEnrolled || !Array.isArray(req.user.faceEmbedding) || !req.user.faceEmbedding.length) {
+      return res.status(412).json({ message: "Please enroll your face before checking out." })
+    }
+    if (!_matches(faceEmbedding, req.user.faceEmbedding, 0.6)) {
+      return res.status(401).json({ message: "Face did not match your enrolled face." })
+    }
+
     const tzOffsetMinutes = getClientTzOffset(req)
-
-    const verdict = verifyFaceOrReject(req.user, req.body.faceEmbedding)
-    if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
-
-    let baseNow = null
-    if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
-      baseNow = new Date(Number(req.body.clientTimestamp))
-      console.log("[v0] Using clientTimestamp for check-out:", baseNow.toISOString())
-    } else {
-      baseNow = getLocalNow(tzOffsetMinutes)
-      console.log("[v0] Using tzOffset-based time for check-out:", baseNow.toISOString(), "offset:", tzOffsetMinutes)
-    }
-
-    const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
-
-    const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDateFromBase(baseNow)
-    const checkOutTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTimeFromBase(baseNow)
-
-    console.log("[v0] Check-out computed:", {
-      source: isValidYmd(clientLocalDate) && isValidHms(clientLocalTime) ? "client-local" : "server-adjusted",
-      today,
-      checkOutTime,
-      clientTimeZone,
-      tzOffsetMinutes,
-    })
-
+    const today = getCurrentDate(tzOffsetMinutes)
     const record = await Attendance.findOne({ user: req.user._id, date: today })
-    if (!record) {
-      return res.status(404).json({ message: "No check-in record found for today. Please check in first." })
+    if (!record?.checkIn) {
+      return res.status(404).json({ message: "No open check-in found to check out." })
     }
-    if (!record.checkIn) {
-      return res.status(400).json({ message: "You must check in before checking out." })
-    }
-    if (record.checkOut) {
-      return res.status(400).json({
-        message: "You have already checked out today",
-        attendance: record,
-      })
-    }
-
-    if (Array.isArray(record?.face?.checkIn) && Array.isArray(req.body.faceEmbedding)) {
-      const d = euclidean(record.face.checkIn, req.body.faceEmbedding)
-      const SAME_FACE_THRESHOLD = 0.6
-      if (!(d <= SAME_FACE_THRESHOLD)) {
-        return res
-          .status(401)
-          .json({ message: "Checkout denied: the face does not match the one used at check-in. Please try again." })
+    // Enforce same-face-as-checkin with slightly tighter threshold
+    if (Array.isArray(record.checkInFaceEmbedding) && record.checkInFaceEmbedding.length) {
+      if (!_matches(faceEmbedding, record.checkInFaceEmbedding, 0.5)) {
+        return res.status(401).json({ message: "Face does not match the one used during check-in." })
       }
     }
 
+    const { location, clientLocalDate, clientLocalTime } = req.body
+    const checkOutTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTime(tzOffsetMinutes)
+
     record.checkOut = checkOutTime
     record.face = record.face || {}
-    record.face.checkOut = req.body.faceEmbedding?.map(Number)
-    record.face.version = record.face.version || "face-api-0.22.2"
-
+    record.face.checkOut = faceEmbedding.map(Number)
+    record.checkOutFaceEmbedding = faceEmbedding.map(Number)
     if (location) {
       record.location = record.location || {}
       record.location.checkOut = JSON.stringify(location)
     }
-
     await record.save()
     await record.populate("user", "name employeeId")
 
-    console.log("[v0] Check-out saved:", { date: record.date, checkOut: record.checkOut, matchBlueClock: true })
-
-    res.json({
-      message: "Checked out successfully",
-      attendance: record,
-    })
+    return res.status(200).json({ message: "Checked out successfully.", attendance: record })
   } catch (error) {
     console.error("Check-out error:", error)
-    res.status(500).json({ error: "Failed to check out. Please try again." })
+    return res.status(500).json({ error: "Failed to check out. Please try again." })
   }
 })
 
@@ -704,7 +644,6 @@ router.get("/download-report", auth, managerAuth, async (req, res) => {
     csvContent += `Productivity Rate,${((totalHours / (totalRecords * 8)) * 100).toFixed(2)}%,(Actual vs Maximum)\n`
     csvContent += "\n"
 
-    // Additional analysis
     csvContent += `ADDITIONAL INFORMATION\n`
     csvContent += Array(10).fill('""').join(",") + "\n"
     csvContent += `Report Generated By,${req.user.name},${req.user.role}\n`

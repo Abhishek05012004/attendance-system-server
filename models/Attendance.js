@@ -38,6 +38,8 @@ const attendanceSchema = new mongoose.Schema(
       checkOut: { type: [Number], default: undefined },
       version: { type: String, default: "face-api-0.22.2" },
     },
+    checkInFaceEmbedding: { type: [Number], default: undefined },
+    checkOutFaceEmbedding: { type: [Number], default: undefined },
   },
   {
     timestamps: true,
