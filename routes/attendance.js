@@ -111,12 +111,44 @@ const verifyFaceOrReject = (user, embedding) => {
   return { ok: false, status: 401, message: "Face did not match. Please try again." }
 }
 
+async function findFaceOwner(embedding, excludeUserId) {
+  const others = await User.find({ faceEnrolled: true }).select("_id faceEmbedding name email")
+  let best = { userId: null, distance: Number.POSITIVE_INFINITY }
+  for (const u of others) {
+    if (excludeUserId && String(u._id) === String(excludeUserId)) continue
+    const d = euclidean(embedding, u.faceEmbedding || [])
+    if (d < best.distance) best = { userId: u._id, distance: d }
+  }
+  return best
+}
+
 router.post("/checkin", auth, async (req, res) => {
   try {
     const tzOffsetMinutes = getClientTzOffset(req)
 
-    const verdict = verifyFaceOrReject(req.user, req.body.faceEmbedding)
-    if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
+    const incomingEmbedding = req.body.faceEmbedding
+    if (!req.user.faceEnrolled) {
+      if (!Array.isArray(incomingEmbedding) || incomingEmbedding.length < 64) {
+        return res.status(412).json({ message: "Please enroll your face before checking in." })
+      }
+      const UNIQUE_THRESHOLD = 0.45
+      const { userId: ownerId, distance } = await findFaceOwner(incomingEmbedding, req.user._id)
+      if (ownerId && distance <= UNIQUE_THRESHOLD) {
+        return res.status(409).json({
+          message: "This face is already linked to another account. Contact admin.",
+          code: "FACE_ALREADY_LINKED",
+        })
+      }
+      // Save face to current user
+      req.user.faceEmbedding = incomingEmbedding.map(Number)
+      req.user.faceEnrolled = true
+      req.user.faceModelVersion = "face-api-0.22.2"
+      await req.user.save()
+    } else {
+      // Existing users: enforce face verification strictly
+      const verdict = verifyFaceOrReject(req.user, incomingEmbedding)
+      if (!verdict.ok) return res.status(verdict.status).json({ message: verdict.message })
+    }
 
     let baseNow = null
     if (req.body?.clientTimestamp && Number.isFinite(Number(req.body.clientTimestamp))) {
@@ -152,7 +184,7 @@ router.post("/checkin", auth, async (req, res) => {
     if (exists) {
       exists.checkIn = checkInTime
       exists.face = exists.face || {}
-      exists.face.checkIn = req.body.faceEmbedding?.map(Number)
+      exists.face.checkIn = incomingEmbedding?.map(Number)
       exists.face.version = "face-api-0.22.2"
       if (location) {
         exists.location = exists.location || {}
@@ -169,7 +201,7 @@ router.post("/checkin", auth, async (req, res) => {
         checkIn: checkInTime,
         location: locationData,
         face: {
-          checkIn: req.body.faceEmbedding?.map(Number),
+          checkIn: incomingEmbedding?.map(Number),
           version: "face-api-0.22.2",
         },
       })
