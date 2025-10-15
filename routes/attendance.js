@@ -158,7 +158,7 @@ router.post("/checkin", auth, async (req, res) => {
       return res.status(401).json({ message: "Face did not match your enrolled face." })
     }
 
-    const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
+    const location = req.body.location
     if (!location || typeof location.lat !== "number" || typeof location.lng !== "number") {
       return res.status(400).json({ message: "Location permission is required to check in." })
     }
@@ -172,14 +172,19 @@ router.post("/checkin", auth, async (req, res) => {
     }
 
     const tzOffsetMinutes = getClientTzOffset(req)
-    const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDate(tzOffsetMinutes)
-    const checkInTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTime(tzOffsetMinutes)
+    const today = isValidYmd(req.body.clientLocalDate) ? req.body.clientLocalDate : getCurrentDate(tzOffsetMinutes)
+    const checkInTime = isValidHms(req.body.clientLocalTime)
+      ? req.body.clientLocalTime
+      : getCurrentTime(tzOffsetMinutes)
 
     console.log("[v0] Check-in computed:", {
-      source: isValidYmd(clientLocalDate) && isValidHms(clientLocalTime) ? "client-local" : "server-adjusted",
+      source:
+        isValidYmd(req.body.clientLocalDate) && isValidHms(req.body.clientLocalTime)
+          ? "client-local"
+          : "server-adjusted",
       today,
       checkInTime,
-      clientTimeZone,
+      clientTimeZone: req.body.clientTimeZone,
       tzOffsetMinutes,
     })
 
@@ -222,7 +227,7 @@ router.post("/checkout", auth, async (req, res) => {
       return res.status(401).json({ message: "Face did not match your enrolled face." })
     }
 
-    const { location, clientLocalDate, clientLocalTime } = req.body
+    const location = req.body.location
     if (!location || typeof location.lat !== "number" || typeof location.lng !== "number") {
       return res.status(400).json({ message: "Location permission is required to check out." })
     }
@@ -248,12 +253,19 @@ router.post("/checkout", auth, async (req, res) => {
       }
     }
 
-    const checkOutTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTime(tzOffsetMinutes)
+    const checkOutTime = isValidHms(req.body.clientLocalTime)
+      ? req.body.clientLocalTime
+      : getCurrentTime(tzOffsetMinutes)
+
+    record.checkOut = checkOutTime
+
     record.face = record.face || {}
     record.face.checkOut = faceEmbedding.map(Number)
     record.checkOutFaceEmbedding = faceEmbedding.map(Number)
+
     record.location = record.location || {}
     record.location.checkOut = JSON.stringify(location)
+
     await record.save()
     await record.populate("user", "name employeeId")
 
