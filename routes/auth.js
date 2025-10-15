@@ -120,6 +120,11 @@ router.post("/register", async (req, res) => {
       }
     }
 
+    // Make face enrollment compulsory at registration
+    if (!Array.isArray(faceEmbedding) || faceEmbedding.length < 64) {
+      return res.status(400).json({ error: "Face enrollment is required to register." })
+    }
+
     let reqFaceEmbedding
     if (Array.isArray(faceEmbedding) && faceEmbedding.length >= 64) {
       reqFaceEmbedding = faceEmbedding.map(Number)

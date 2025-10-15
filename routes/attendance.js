@@ -128,30 +128,50 @@ const _euclid = (a = [], b = []) => {
 }
 const _matches = (probe = [], enrolled = [], t = 0.6) => _euclid(probe, enrolled) <= t
 
+const OFFICE_LAT = Number(process.env.OFFICE_LAT || 22.3137575)
+const OFFICE_LNG = Number(process.env.OFFICE_LNG || 73.1812517)
+const OFFICE_RADIUS_METERS = Number(process.env.OFFICE_RADIUS_METERS || 50)
+
+// Haversine distance in meters
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180
+  const R = 6371000 // meters
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
 router.post("/checkin", auth, async (req, res) => {
   try {
     const faceEmbedding = req.body?.faceEmbedding
+    if (!req.user.faceEnrolled || !Array.isArray(req.user.faceEmbedding) || !req.user.faceEmbedding.length) {
+      return res.status(412).json({ message: "Face enrollment required before check-in." })
+    }
     if (!Array.isArray(faceEmbedding) || faceEmbedding.length < 64) {
       return res.status(400).json({ message: "Face data is required for check-in." })
     }
+    if (!_matches(faceEmbedding, req.user.faceEmbedding, 0.55)) {
+      return res.status(401).json({ message: "Face did not match your enrolled face." })
+    }
 
-    if (!req.user.faceEnrolled || !Array.isArray(req.user.faceEmbedding) || !req.user.faceEmbedding.length) {
-      // Inline enroll then proceed with check-in
-      req.user.faceEmbedding = faceEmbedding.map(Number)
-      req.user.faceEnrolled = true
-      req.user.faceModelVersion = "face-api-0.22.2"
-      await req.user.save()
-    } else {
-      // Verify against enrolled face
-      if (!_matches(faceEmbedding, req.user.faceEmbedding, 0.6)) {
-        return res.status(401).json({ message: "Face did not match your enrolled face." })
-      }
+    const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
+    if (!location || typeof location.lat !== "number" || typeof location.lng !== "number") {
+      return res.status(400).json({ message: "Location permission is required to check in." })
+    }
+    const distance = haversineMeters(location.lat, location.lng, OFFICE_LAT, OFFICE_LNG)
+    if (distance > OFFICE_RADIUS_METERS) {
+      return res.status(403).json({
+        message: `Out of office range. Move closer to the office to check in.`,
+        distanceMeters: Math.round(distance),
+        allowedRadiusMeters: OFFICE_RADIUS_METERS,
+      })
     }
 
     const tzOffsetMinutes = getClientTzOffset(req)
-
-    const { location, clientLocalDate, clientLocalTime, clientTimeZone } = req.body
-
     const today = isValidYmd(clientLocalDate) ? clientLocalDate : getCurrentDate(tzOffsetMinutes)
     const checkInTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTime(tzOffsetMinutes)
 
@@ -177,10 +197,8 @@ router.post("/checkin", auth, async (req, res) => {
     attendance.face.checkIn = faceEmbedding.map(Number)
     attendance.face.version = "face-api-0.22.2"
     attendance.checkInFaceEmbedding = faceEmbedding.map(Number)
-    if (location) {
-      attendance.location = attendance.location || {}
-      attendance.location.checkIn = JSON.stringify(location)
-    }
+    attendance.location = attendance.location || {}
+    attendance.location.checkIn = JSON.stringify(location)
     await attendance.save()
     await attendance.populate("user", "name employeeId")
 
@@ -194,15 +212,27 @@ router.post("/checkin", auth, async (req, res) => {
 router.post("/checkout", auth, async (req, res) => {
   try {
     const faceEmbedding = req.body?.faceEmbedding
+    if (!req.user.faceEnrolled || !Array.isArray(req.user.faceEmbedding) || !req.user.faceEmbedding.length) {
+      return res.status(412).json({ message: "Face enrollment required before check-out." })
+    }
     if (!Array.isArray(faceEmbedding) || faceEmbedding.length < 64) {
       return res.status(400).json({ message: "Face data is required for check-out." })
     }
-
-    if (!req.user.faceEnrolled || !Array.isArray(req.user.faceEmbedding) || !req.user.faceEmbedding.length) {
-      return res.status(412).json({ message: "Please enroll your face before checking out." })
-    }
-    if (!_matches(faceEmbedding, req.user.faceEmbedding, 0.6)) {
+    if (!_matches(faceEmbedding, req.user.faceEmbedding, 0.55)) {
       return res.status(401).json({ message: "Face did not match your enrolled face." })
+    }
+
+    const { location, clientLocalDate, clientLocalTime } = req.body
+    if (!location || typeof location.lat !== "number" || typeof location.lng !== "number") {
+      return res.status(400).json({ message: "Location permission is required to check out." })
+    }
+    const distance = haversineMeters(location.lat, location.lng, OFFICE_LAT, OFFICE_LNG)
+    if (distance > OFFICE_RADIUS_METERS) {
+      return res.status(403).json({
+        message: `Out of office range. Move closer to the office to check out.`,
+        distanceMeters: Math.round(distance),
+        allowedRadiusMeters: OFFICE_RADIUS_METERS,
+      })
     }
 
     const tzOffsetMinutes = getClientTzOffset(req)
@@ -211,24 +241,19 @@ router.post("/checkout", auth, async (req, res) => {
     if (!record?.checkIn) {
       return res.status(404).json({ message: "No open check-in found to check out." })
     }
-    // Enforce same-face-as-checkin with slightly tighter threshold
+
     if (Array.isArray(record.checkInFaceEmbedding) && record.checkInFaceEmbedding.length) {
       if (!_matches(faceEmbedding, record.checkInFaceEmbedding, 0.5)) {
         return res.status(401).json({ message: "Face does not match the one used during check-in." })
       }
     }
 
-    const { location, clientLocalDate, clientLocalTime } = req.body
     const checkOutTime = isValidHms(clientLocalTime) ? clientLocalTime : getCurrentTime(tzOffsetMinutes)
-
-    record.checkOut = checkOutTime
     record.face = record.face || {}
     record.face.checkOut = faceEmbedding.map(Number)
     record.checkOutFaceEmbedding = faceEmbedding.map(Number)
-    if (location) {
-      record.location = record.location || {}
-      record.location.checkOut = JSON.stringify(location)
-    }
+    record.location = record.location || {}
+    record.location.checkOut = JSON.stringify(location)
     await record.save()
     await record.populate("user", "name employeeId")
 
