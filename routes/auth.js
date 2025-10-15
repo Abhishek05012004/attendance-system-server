@@ -440,6 +440,8 @@ router.post("/login", async (req, res) => {
 
     console.log("✅ Login successful!")
 
+    const faceEnrolled = !!(user.faceEnrolled || (Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0))
+
     res.json({
       message: "Login successful",
       token,
@@ -453,6 +455,7 @@ router.post("/login", async (req, res) => {
         position: user.position,
         phone: user.phone,
         address: user.address,
+        faceEnrolled,
       },
     })
   } catch (error) {
