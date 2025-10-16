@@ -702,4 +702,50 @@ router.get("/download-report", auth, managerAuth, async (req, res) => {
   }
 })
 
+router.get("/calendar/:month/:year", auth, async (req, res) => {
+  try {
+    const { month, year } = req.params
+    const targetMonth = Number(month)
+    const targetYear = Number(year)
+
+    if (targetMonth < 1 || targetMonth > 12 || targetYear < 2000 || targetYear > 2100) {
+      return res.status(400).json({ error: "Invalid month or year" })
+    }
+
+    const startDate = `${targetYear}-${String(targetMonth).padStart(2, "0")}-01`
+    const lastDay = new Date(targetYear, targetMonth, 0).getDate()
+    const endDate = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+
+    const query = {
+      user: req.user._id,
+      date: { $gte: startDate, $lte: endDate },
+    }
+
+    const attendanceRecords = await Attendance.find(query)
+
+    // Create a map of dates to attendance data
+    const calendarData = {}
+    attendanceRecords.forEach((record) => {
+      calendarData[record.date] = {
+        date: record.date,
+        checkIn: record.checkIn,
+        checkOut: record.checkOut,
+        workingHours: record.workingHours,
+        status: record.status,
+        isPresent: !!record.checkIn,
+      }
+    })
+
+    res.json({
+      month: targetMonth,
+      year: targetYear,
+      calendarData,
+      totalDays: lastDay,
+    })
+  } catch (error) {
+    console.error("Calendar data error:", error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 module.exports = router
