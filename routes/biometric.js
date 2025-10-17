@@ -90,6 +90,10 @@ router.post("/enroll/complete", auth, async (req, res) => {
       return res.status(400).json({ error: "Invalid credential format" })
     }
 
+    if (!credential.response.clientDataJSON || !credential.response.attestationObject) {
+      return res.status(400).json({ error: "Invalid credential format: missing required response fields" })
+    }
+
     // Verify challenge matches
     const clientDataJSON = JSON.parse(Buffer.from(base64url.decode(credential.response.clientDataJSON)).toString())
 
@@ -101,11 +105,14 @@ router.post("/enroll/complete", auth, async (req, res) => {
       return res.status(400).json({ error: "Invalid attestation type" })
     }
 
-    // Store credential
+    const attestationObject = base64url.decode(credential.response.attestationObject)
+
+    // Store credential with proper binary data
     const newCredential = {
-      credentialId: Buffer.from(base64url.decode(credential.id)),
-      publicKey: Buffer.from(credential.response.publicKey || ""),
-      counter: credential.response.signCount || 0,
+      credentialId: base64url.decode(credential.id),
+      attestationObject: attestationObject,
+      clientDataJSON: base64url.decode(credential.response.clientDataJSON),
+      counter: 0,
       transports: credential.response.transports || ["internal"],
       name: credentialName || "Fingerprint",
       createdAt: new Date(),
@@ -186,9 +193,11 @@ router.post("/authenticate/complete", async (req, res) => {
       return res.status(404).json({ error: "User not found or biometric not enrolled" })
     }
 
-    // Find matching credential
-    const credentialIdBuffer = Buffer.from(base64url.decode(assertion.id))
-    const credential = user.biometricCredentials.find((c) => c.credentialId.equals(credentialIdBuffer))
+    const assertionIdBuffer = base64url.decode(assertion.id)
+    const credential = user.biometricCredentials.find((c) => {
+      const credIdBuffer = Buffer.isBuffer(c.credentialId) ? c.credentialId : Buffer.from(c.credentialId)
+      return credIdBuffer.equals(assertionIdBuffer)
+    })
 
     if (!credential) {
       return res.status(400).json({ error: "Credential not found" })
