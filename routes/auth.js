@@ -441,6 +441,7 @@ router.post("/login", async (req, res) => {
     console.log("✅ Login successful!")
 
     const faceEnrolled = !!(user.faceEnrolled || (Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0))
+    const fingerprintEnrolled = user.fingerprintEnrolled || false
 
     res.json({
       message: "Login successful",
@@ -456,6 +457,7 @@ router.post("/login", async (req, res) => {
         phone: user.phone,
         address: user.address,
         faceEnrolled,
+        fingerprintEnrolled,
       },
     })
   } catch (error) {

@@ -34,7 +34,7 @@ function verifySignature(publicKeyPem, signature, data) {
 }
 
 // Step 1: Get registration options for fingerprint enrollment
-router.post("/fingerprint/register-options", auth, async (req, res) => {
+router.post("/register-options", auth, async (req, res) => {
   try {
     const user = req.user
     const { deviceName } = req.body
@@ -61,7 +61,7 @@ router.post("/fingerprint/register-options", auth, async (req, res) => {
 })
 
 // Step 2: Register fingerprint credential
-router.post("/fingerprint/register", auth, async (req, res) => {
+router.post("/register", auth, async (req, res) => {
   try {
     const user = req.user
     const { credentialId, publicKey, counter, transports, deviceName, challenge } = req.body
@@ -75,7 +75,15 @@ router.post("/fingerprint/register", auth, async (req, res) => {
       return res.status(400).json({ error: "Challenge expired" })
     }
 
-    // Check if credential already exists
+    const existingCredentialGlobal = await User.findOne({
+      "fingerprintCredentials.credentialId": credentialId,
+    })
+
+    if (existingCredentialGlobal) {
+      return res.status(400).json({ error: "This fingerprint is already registered to another user" })
+    }
+
+    // Check if credential already exists for this user
     const existingCredential = user.fingerprintCredentials.find((c) => c.credentialId === credentialId)
     if (existingCredential) {
       return res.status(400).json({ error: "This fingerprint is already registered" })
@@ -106,7 +114,7 @@ router.post("/fingerprint/register", auth, async (req, res) => {
 })
 
 // Step 3: Get authentication options for fingerprint login
-router.post("/fingerprint/auth-options", async (req, res) => {
+router.post("/auth-options", async (req, res) => {
   try {
     const { email } = req.body
 
@@ -152,7 +160,7 @@ router.post("/fingerprint/auth-options", async (req, res) => {
 })
 
 // Step 4: Authenticate with fingerprint
-router.post("/fingerprint/authenticate", async (req, res) => {
+router.post("/authenticate", async (req, res) => {
   try {
     const { email, credentialId, signature, clientData, counter, challenge } = req.body
 
@@ -230,7 +238,7 @@ router.post("/fingerprint/authenticate", async (req, res) => {
 })
 
 // Get enrolled fingerprints
-router.get("/fingerprint/list", auth, async (req, res) => {
+router.get("/list", auth, async (req, res) => {
   try {
     const user = req.user
 
@@ -251,7 +259,7 @@ router.get("/fingerprint/list", auth, async (req, res) => {
 })
 
 // Remove a fingerprint credential
-router.delete("/fingerprint/:credentialId", auth, async (req, res) => {
+router.delete("/:credentialId", auth, async (req, res) => {
   try {
     const user = req.user
     const { credentialId } = req.params
