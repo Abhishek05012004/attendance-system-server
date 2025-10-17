@@ -15,6 +15,10 @@ const base64url = {
   },
 }
 
+const getRPID = (req) => {
+  return "attendance-system-client-nine.vercel.app"
+}
+
 // Auth middleware
 const auth = async (req, res, next) => {
   try {
@@ -39,6 +43,8 @@ router.post("/enroll/start", auth, async (req, res) => {
     // Generate challenge (random bytes)
     const challenge = crypto.randomBytes(32)
 
+    const rpID = getRPID(req)
+
     const enrollmentSession = {
       userId: user._id,
       challenge: base64url.encode(challenge),
@@ -50,7 +56,7 @@ router.post("/enroll/start", auth, async (req, res) => {
       challenge: base64url.encode(challenge),
       rp: {
         name: "Employee Attendance System",
-        id: process.env.WEBAUTHN_RP_ID || "localhost",
+        id: rpID,
       },
       user: {
         id: base64url.encode(user._id.toString()),
@@ -143,8 +149,11 @@ router.post("/authenticate/start", async (req, res) => {
     // Generate challenge
     const challenge = crypto.randomBytes(32)
 
+    const rpID = getRPID(req)
+
     res.json({
       challenge: base64url.encode(challenge),
+      rpID: rpID,
       timeout: 60000,
       userVerification: "preferred",
       allowCredentials: user.biometricCredentials.map((cred) => ({

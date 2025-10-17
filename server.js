@@ -20,6 +20,7 @@ const app = express()
 const allowedOrigins = [
   "https://attendance-system-client-nine.vercel.app", // NEW frontend
   "http://localhost:5173", // Local development
+  "http://localhost:3000", // Local development alternative
 ]
 
 app.use(
@@ -41,6 +42,14 @@ app.use(
 
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
+
+/* ================================ */
+/* ENVIRONMENT VARIABLES SETUP */
+/* ================================ */
+if (!process.env.WEBAUTHN_RP_ID && process.env.NODE_ENV === "production") {
+  console.warn("⚠️ WEBAUTHN_RP_ID not set. Using dynamic domain detection.")
+  console.warn("For production, set WEBAUTHN_RP_ID to your domain (e.g., attendance-system-client-nine.vercel.app)")
+}
 
 /* ================================ */
 /* MONGODB CONNECTION */
