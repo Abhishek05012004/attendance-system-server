@@ -23,6 +23,19 @@ const userSchema = new mongoose.Schema(
     faceEmbedding: { type: [Number], default: undefined }, // 128-d descriptor
     faceEnrolled: { type: Boolean, default: false },
     faceModelVersion: { type: String, default: "face-api-0.22.2" },
+    // Biometric credential fields for WebAuthn
+    biometricCredentials: [
+      {
+        credentialId: Buffer, // Unique credential ID from authenticator
+        publicKey: Buffer, // Public key for verification
+        counter: Number, // Counter for cloned authenticator detection
+        transports: [String], // e.g., ["usb", "internal", "nfc"]
+        createdAt: { type: Date, default: Date.now },
+        lastUsed: Date,
+        name: String, // User-friendly name (e.g., "My Fingerprint")
+      },
+    ],
+    biometricEnrolled: { type: Boolean, default: false },
   },
   {
     timestamps: true,
