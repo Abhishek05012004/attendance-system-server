@@ -95,10 +95,20 @@ router.post("/register-options", auth, async (req, res) => {
 router.post("/register", auth, async (req, res) => {
   try {
     const user = req.user
-    const { credentialId, publicKeyJwk, counter, transports, deviceName, challenge } = req.body
+    const {
+      credentialId,
+      attestationObject,
+      clientDataJSON,
+      publicKeyJwk,
+      counter,
+      transports,
+      deviceName,
+      challenge,
+    } = req.body
 
     console.log("[v0] Register fingerprint - Challenge from client:", challenge)
     console.log("[v0] Register fingerprint - Stored challenge:", user.fingerprintChallenge)
+    console.log("[v0] Register fingerprint - Credential ID:", credentialId)
 
     // Verify challenge
     if (!user.fingerprintChallenge) {
@@ -134,7 +144,9 @@ router.post("/register", auth, async (req, res) => {
     // Add new credential
     user.fingerprintCredentials.push({
       credentialId,
-      publicKeyJwk: JSON.stringify(publicKeyJwk), // Store as JSON string
+      attestationObject: attestationObject || "",
+      clientDataJSON: clientDataJSON || "",
+      publicKeyJwk: JSON.stringify(publicKeyJwk || {}),
       counter: counter || 0,
       transports: transports || [],
       deviceName: deviceName || "Device",

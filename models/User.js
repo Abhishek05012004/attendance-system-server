@@ -24,6 +24,8 @@ const userSchema = new mongoose.Schema(
     fingerprintCredentials: [
       {
         credentialId: { type: String, required: true, unique: true },
+        attestationObject: { type: String },
+        clientDataJSON: { type: String },
         publicKeyJwk: { type: String }, // Store as JSON string
         counter: { type: Number, default: 0 },
         transports: [String],
