@@ -33,7 +33,6 @@ function verifySignature(publicKeyPem, signature, data) {
   }
 }
 
-// Step 1: Get registration options for fingerprint enrollment
 router.post("/register-options", auth, async (req, res) => {
   try {
     const user = req.user
@@ -96,6 +95,7 @@ router.post("/register", auth, async (req, res) => {
       counter: counter || 0,
       transports: transports || [],
       deviceName: deviceName || "Device",
+      createdAt: new Date(),
     })
 
     user.fingerprintEnrolled = true
