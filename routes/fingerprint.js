@@ -30,19 +30,6 @@ function arrayBufferToBase64Url(buffer) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
 }
 
-// Helper to convert base64url to ArrayBuffer
-function base64UrlToArrayBuffer(base64url) {
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/")
-  const padLen = (4 - (base64.length % 4)) % 4
-  const padded = base64 + "=".repeat(padLen)
-  const binary = atob(padded)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes.buffer
-}
-
 // Step 1: Get registration options
 router.post("/register-options", auth, async (req, res) => {
   try {
@@ -66,7 +53,7 @@ router.post("/register-options", auth, async (req, res) => {
       challenge: challengeBase64Url,
       rp: {
         name: "Employee Attendance System",
-        id: "localhost", // Will be replaced by client with actual domain
+        id: "localhost",
       },
       user: {
         id: arrayBufferToBase64Url(Buffer.from(user._id.toString())),
@@ -74,8 +61,8 @@ router.post("/register-options", auth, async (req, res) => {
         displayName: user.name,
       },
       pubKeyCredParams: [
-        { alg: -7, type: "public-key" }, // ES256
-        { alg: -257, type: "public-key" }, // RS256
+        { alg: -7, type: "public-key" },
+        { alg: -257, type: "public-key" },
       ],
       timeout: 60000,
       attestation: "direct",
@@ -95,20 +82,16 @@ router.post("/register-options", auth, async (req, res) => {
 router.post("/register", auth, async (req, res) => {
   try {
     const user = req.user
-    const {
-      credentialId,
-      attestationObject,
-      clientDataJSON,
-      publicKeyJwk,
-      counter,
-      transports,
-      deviceName,
-      challenge,
-    } = req.body
+    const { credentialId, attestationObject, clientDataJSON, transports, deviceName, challenge } = req.body
 
-    console.log("[v0] Register fingerprint - Challenge from client:", challenge)
-    console.log("[v0] Register fingerprint - Stored challenge:", user.fingerprintChallenge)
-    console.log("[v0] Register fingerprint - Credential ID:", credentialId)
+    // Validate required fields
+    if (!credentialId) {
+      return res.status(400).json({ error: "Credential ID is required" })
+    }
+
+    if (!challenge) {
+      return res.status(400).json({ error: "Challenge is required" })
+    }
 
     // Verify challenge
     if (!user.fingerprintChallenge) {
@@ -141,13 +124,11 @@ router.post("/register", auth, async (req, res) => {
       return res.status(400).json({ error: "This fingerprint is already registered" })
     }
 
-    // Add new credential
     user.fingerprintCredentials.push({
-      credentialId,
+      credentialId: credentialId,
       attestationObject: attestationObject || "",
       clientDataJSON: clientDataJSON || "",
-      publicKeyJwk: JSON.stringify(publicKeyJwk || {}),
-      counter: counter || 0,
+      counter: 0,
       transports: transports || [],
       deviceName: deviceName || "Device",
       createdAt: new Date(),
@@ -157,8 +138,6 @@ router.post("/register", auth, async (req, res) => {
     user.fingerprintChallenge = undefined
     user.fingerprintChallengeExpiry = undefined
     await user.save()
-
-    console.log("[v0] Fingerprint registered successfully for user:", user._id)
 
     res.json({
       message: "Fingerprint registered successfully",
