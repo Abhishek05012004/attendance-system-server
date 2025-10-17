@@ -16,14 +16,11 @@ const userSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     profileImage: String,
     workingHours: { type: Number, default: 8 }, // hours per day
-    // Password reset fields
     resetPasswordToken: String,
     resetPasswordExpiry: Date,
-    // Face recognition fields
     faceEmbedding: { type: [Number], default: undefined }, // 128-d descriptor
     faceEnrolled: { type: Boolean, default: false },
     faceModelVersion: { type: String, default: "face-api-0.22.2" },
-    // Biometric credential fields for WebAuthn
     biometricCredentials: [
       {
         credentialId: Buffer, // Unique credential ID from authenticator

@@ -31,17 +31,14 @@ const auth = async (req, res, next) => {
   }
 }
 
-// 1. Start biometric enrollment
 router.post("/enroll/start", auth, async (req, res) => {
   try {
     const user = req.user
-    const credentialName = req.body.credentialName || `Fingerprint ${Date.now()}`
+    const credentialName = req.body.credentialName || `Fingerprint ${new Date().toLocaleDateString()}`
 
     // Generate challenge (random bytes)
     const challenge = crypto.randomBytes(32)
 
-    // Store challenge temporarily in session/cache (in production, use Redis)
-    // For now, we'll return it to client and verify on completion
     const enrollmentSession = {
       userId: user._id,
       challenge: base64url.encode(challenge),
@@ -78,7 +75,6 @@ router.post("/enroll/start", auth, async (req, res) => {
   }
 })
 
-// 2. Complete biometric enrollment
 router.post("/enroll/complete", auth, async (req, res) => {
   try {
     const user = req.user
@@ -98,9 +94,6 @@ router.post("/enroll/complete", auth, async (req, res) => {
     if (clientDataJSON.type !== "webauthn.create") {
       return res.status(400).json({ error: "Invalid attestation type" })
     }
-
-    // Extract public key from attestation object
-    const attestationObject = base64url.decode(credential.response.attestationObject)
 
     // Store credential
     const newCredential = {
@@ -129,7 +122,6 @@ router.post("/enroll/complete", auth, async (req, res) => {
   }
 })
 
-// 3. Start biometric authentication
 router.post("/authenticate/start", async (req, res) => {
   try {
     const { email } = req.body
@@ -167,7 +159,6 @@ router.post("/authenticate/start", async (req, res) => {
   }
 })
 
-// 4. Complete biometric authentication
 router.post("/authenticate/complete", async (req, res) => {
   try {
     const { email, assertion, challenge } = req.body
@@ -241,7 +232,6 @@ router.post("/authenticate/complete", async (req, res) => {
   }
 })
 
-// 5. Get enrolled biometric credentials
 router.get("/credentials", auth, async (req, res) => {
   try {
     const user = req.user
@@ -265,7 +255,6 @@ router.get("/credentials", auth, async (req, res) => {
   }
 })
 
-// 6. Remove biometric credential
 router.delete("/credentials/:credentialId", auth, async (req, res) => {
   try {
     const user = req.user
@@ -284,6 +273,32 @@ router.delete("/credentials/:credentialId", auth, async (req, res) => {
     res.json({ message: "Credential removed successfully" })
   } catch (error) {
     console.error("Remove credential error:", error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+router.put("/credentials/:credentialId", auth, async (req, res) => {
+  try {
+    const user = req.user
+    const { credentialId } = req.params
+    const { name } = req.body
+
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" })
+    }
+
+    const credential = user.biometricCredentials.find((c) => c._id.toString() === credentialId)
+
+    if (!credential) {
+      return res.status(404).json({ error: "Credential not found" })
+    }
+
+    credential.name = name
+    await user.save()
+
+    res.json({ message: "Credential renamed successfully", name })
+  } catch (error) {
+    console.error("Rename credential error:", error)
     res.status(500).json({ error: error.message })
   }
 })
