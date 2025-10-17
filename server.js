@@ -10,17 +10,15 @@ const attendanceRoutes = require("./routes/attendance")
 const userRoutes = require("./routes/users")
 const leaveRoutes = require("./routes/leave")
 const faceRoutes = require("./routes/face")
-const biometricRoutes = require("./routes/biometric")
 
 const app = express()
 
-/* ================================ */
-/* CORS CONFIGURATION - FIXED */
-/* ================================ */
+/* ================================
+   CORS CONFIGURATION - FIXED
+   ================================ */
 const allowedOrigins = [
   "https://attendance-system-client-nine.vercel.app", // NEW frontend
   "http://localhost:5173", // Local development
-  "http://localhost:3000", // Local development alternative
 ]
 
 app.use(
@@ -43,17 +41,9 @@ app.use(
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
-/* ================================ */
-/* ENVIRONMENT VARIABLES SETUP */
-/* ================================ */
-if (!process.env.WEBAUTHN_RP_ID && process.env.NODE_ENV === "production") {
-  console.warn("⚠️ WEBAUTHN_RP_ID not set. Using dynamic domain detection.")
-  console.warn("For production, set WEBAUTHN_RP_ID to your domain (e.g., attendance-system-client-nine.vercel.app)")
-}
-
-/* ================================ */
-/* MONGODB CONNECTION */
-/* ================================ */
+/* ================================
+   MONGODB CONNECTION
+   ================================ */
 let isConnected = false // Track connection status
 
 const connectDB = async () => {
@@ -105,9 +95,9 @@ const connectDB = async () => {
 // Connect to MongoDB when the server starts
 connectDB()
 
-/* ================================ */
-/* MIDDLEWARE TO CHECK DB CONNECTION */
-/* ================================ */
+/* ================================
+   MIDDLEWARE TO CHECK DB CONNECTION
+   ================================ */
 app.use(async (req, res, next) => {
   if (!isConnected) {
     try {
@@ -122,19 +112,18 @@ app.use(async (req, res, next) => {
   next()
 })
 
-/* ================================ */
-/* ROUTES */
-/* ================================ */
+/* ================================
+   ROUTES
+   ================================ */
 app.use("/api/auth", authRoutes)
 app.use("/api/attendance", attendanceRoutes)
 app.use("/api/users", userRoutes)
 app.use("/api/leave", leaveRoutes)
 app.use("/api/face", faceRoutes)
-app.use("/api/biometric", biometricRoutes)
 
-/* ================================ */
-/* HEALTH CHECK */
-/* ================================ */
+/* ================================
+   HEALTH CHECK
+   ================================ */
 app.get("/api/health", async (req, res) => {
   try {
     const dbState = mongoose.connection.readyState
@@ -164,9 +153,9 @@ app.get("/api/health", async (req, res) => {
   }
 })
 
-/* ================================ */
-/* ROOT ENDPOINT */
-/* ================================ */
+/* ================================
+   ROOT ENDPOINT
+   ================================ */
 app.get("/", (req, res) => {
   res.json({
     message: "Attendance System API Server",
@@ -177,14 +166,13 @@ app.get("/", (req, res) => {
       users: "/api/users",
       leave: "/api/leave",
       face: "/api/face",
-      biometric: "/api/biometric",
     },
   })
 })
 
-/* ================================ */
-/* AUTH LOGIN INFO ROUTE */
-/* ================================ */
+/* ================================
+   AUTH LOGIN INFO ROUTE
+   ================================ */
 app.get("/api/auth/login", (req, res) => {
   res.json({
     message: "Login endpoint - use POST method with email and password",
@@ -197,35 +185,27 @@ app.get("/api/auth/login", (req, res) => {
   })
 })
 
-/* ================================ */
-/* 404 HANDLER */
-/* ================================ */
+/* ================================
+   404 HANDLER
+   ================================ */
 app.use("*", (req, res) => {
   console.log("404 - Route not found:", req.originalUrl)
   res.status(404).json({
     error: "Route not found",
     requestedUrl: req.originalUrl,
-    availableEndpoints: [
-      "/api/health",
-      "/api/auth",
-      "/api/attendance",
-      "/api/users",
-      "/api/leave",
-      "/api/face",
-      "/api/biometric",
-    ],
+    availableEndpoints: ["/api/health", "/api/auth", "/api/attendance", "/api/users", "/api/leave", "/api/face"],
   })
 })
 
-/* ================================ */
-/* GLOBAL ERROR HANDLER */
-/* ================================ */
+/* ================================
+   GLOBAL ERROR HANDLER
+   ================================ */
 app.use((err, req, res, next) => {
   console.error("Global error handler:", err.stack)
   res.status(500).json({ error: "Something went wrong!" })
 })
 
-/* ================================ */
-/* EXPORT FOR VERCEL */
-/* ================================ */
+/* ================================
+   EXPORT FOR VERCEL
+   ================================ */
 module.exports = app
