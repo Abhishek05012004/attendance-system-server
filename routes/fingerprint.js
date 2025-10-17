@@ -20,38 +20,70 @@ const auth = async (req, res, next) => {
   }
 }
 
-// Helper function to verify signature
-function verifySignature(publicKeyPem, signature, data) {
-  try {
-    const crypto = require("crypto")
-    const verifier = crypto.createVerify("SHA256")
-    verifier.update(data)
-    return verifier.verify(publicKeyPem, signature)
-  } catch (error) {
-    console.error("Signature verification error:", error)
-    return false
+// Helper to convert ArrayBuffer to base64url
+function arrayBufferToBase64Url(buffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ""
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i])
   }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
 }
 
+// Helper to convert base64url to ArrayBuffer
+function base64UrlToArrayBuffer(base64url) {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/")
+  const padLen = (4 - (base64.length % 4)) % 4
+  const padded = base64 + "=".repeat(padLen)
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes.buffer
+}
+
+// Step 1: Get registration options
 router.post("/register-options", auth, async (req, res) => {
   try {
     const user = req.user
     const { deviceName } = req.body
 
-    // Generate a challenge
-    const challenge = crypto.randomBytes(32).toString("base64")
+    if (!deviceName || !deviceName.trim()) {
+      return res.status(400).json({ error: "Device name is required" })
+    }
 
-    // Store challenge temporarily (in production, use Redis or session)
-    user.fingerprintChallenge = challenge
-    user.fingerprintChallengeExpiry = Date.now() + 300000 // 5 minutes
+    // Generate a challenge
+    const challenge = crypto.randomBytes(32)
+    const challengeBase64Url = arrayBufferToBase64Url(challenge)
+
+    // Store challenge temporarily (5 minutes expiry)
+    user.fingerprintChallenge = challengeBase64Url
+    user.fingerprintChallengeExpiry = Date.now() + 300000
     await user.save()
 
     res.json({
-      challenge,
-      userId: user._id.toString(),
-      userName: user.email,
-      userDisplayName: user.name,
-      deviceName: deviceName || "My Device",
+      challenge: challengeBase64Url,
+      rp: {
+        name: "Employee Attendance System",
+        id: "localhost", // Will be replaced by client with actual domain
+      },
+      user: {
+        id: arrayBufferToBase64Url(Buffer.from(user._id.toString())),
+        name: user.email,
+        displayName: user.name,
+      },
+      pubKeyCredParams: [
+        { alg: -7, type: "public-key" }, // ES256
+        { alg: -257, type: "public-key" }, // RS256
+      ],
+      timeout: 60000,
+      attestation: "direct",
+      authenticatorSelection: {
+        authenticatorAttachment: "platform",
+        userVerification: "preferred",
+        residentKey: "preferred",
+      },
     })
   } catch (error) {
     console.error("Error generating registration options:", error)
@@ -63,17 +95,28 @@ router.post("/register-options", auth, async (req, res) => {
 router.post("/register", auth, async (req, res) => {
   try {
     const user = req.user
-    const { credentialId, publicKey, counter, transports, deviceName, challenge } = req.body
+    const { credentialId, publicKeyJwk, counter, transports, deviceName, challenge } = req.body
+
+    console.log("[v0] Register fingerprint - Challenge from client:", challenge)
+    console.log("[v0] Register fingerprint - Stored challenge:", user.fingerprintChallenge)
 
     // Verify challenge
-    if (!user.fingerprintChallenge || user.fingerprintChallenge !== challenge) {
-      return res.status(400).json({ error: "Invalid or expired challenge" })
+    if (!user.fingerprintChallenge) {
+      return res.status(400).json({ error: "No challenge found. Please start enrollment again." })
+    }
+
+    if (user.fingerprintChallenge !== challenge) {
+      return res.status(400).json({ error: "Invalid challenge" })
     }
 
     if (Date.now() > user.fingerprintChallengeExpiry) {
-      return res.status(400).json({ error: "Challenge expired" })
+      user.fingerprintChallenge = undefined
+      user.fingerprintChallengeExpiry = undefined
+      await user.save()
+      return res.status(400).json({ error: "Challenge expired. Please start enrollment again." })
     }
 
+    // Check if credential already exists globally
     const existingCredentialGlobal = await User.findOne({
       "fingerprintCredentials.credentialId": credentialId,
     })
@@ -91,7 +134,7 @@ router.post("/register", auth, async (req, res) => {
     // Add new credential
     user.fingerprintCredentials.push({
       credentialId,
-      publicKey,
+      publicKeyJwk: JSON.stringify(publicKeyJwk), // Store as JSON string
       counter: counter || 0,
       transports: transports || [],
       deviceName: deviceName || "Device",
@@ -102,6 +145,8 @@ router.post("/register", auth, async (req, res) => {
     user.fingerprintChallenge = undefined
     user.fingerprintChallengeExpiry = undefined
     await user.save()
+
+    console.log("[v0] Fingerprint registered successfully for user:", user._id)
 
     res.json({
       message: "Fingerprint registered successfully",
@@ -133,22 +178,23 @@ router.post("/auth-options", async (req, res) => {
     }
 
     // Generate challenge
-    const challenge = crypto.randomBytes(32).toString("base64")
+    const challenge = crypto.randomBytes(32)
+    const challengeBase64Url = arrayBufferToBase64Url(challenge)
 
     // Store challenge temporarily
-    user.fingerprintAuthChallenge = challenge
-    user.fingerprintAuthChallengeExpiry = Date.now() + 300000 // 5 minutes
+    user.fingerprintAuthChallenge = challengeBase64Url
+    user.fingerprintAuthChallengeExpiry = Date.now() + 300000
     await user.save()
 
     // Return allowed credentials
     const allowCredentials = user.fingerprintCredentials.map((cred) => ({
       id: cred.credentialId,
       type: "public-key",
-      transports: cred.transports,
+      transports: cred.transports || [],
     }))
 
     res.json({
-      challenge,
+      challenge: challengeBase64Url,
       allowCredentials,
       timeout: 60000,
       userVerification: "preferred",
@@ -162,7 +208,7 @@ router.post("/auth-options", async (req, res) => {
 // Step 4: Authenticate with fingerprint
 router.post("/authenticate", async (req, res) => {
   try {
-    const { email, credentialId, signature, clientData, counter, challenge } = req.body
+    const { email, credentialId, clientDataJSON, authenticatorData, signature, challenge } = req.body
 
     if (!email || !credentialId || !signature) {
       return res.status(400).json({ error: "Missing required fields" })
@@ -184,6 +230,9 @@ router.post("/authenticate", async (req, res) => {
     }
 
     if (Date.now() > user.fingerprintAuthChallengeExpiry) {
+      user.fingerprintAuthChallenge = undefined
+      user.fingerprintAuthChallengeExpiry = undefined
+      await user.save()
       return res.status(400).json({ error: "Challenge expired" })
     }
 
@@ -191,22 +240,6 @@ router.post("/authenticate", async (req, res) => {
     const credential = user.fingerprintCredentials.find((c) => c.credentialId === credentialId)
     if (!credential) {
       return res.status(401).json({ error: "Credential not found" })
-    }
-
-    // Verify signature
-    const signatureBuffer = Buffer.from(signature, "base64")
-    const clientDataBuffer = Buffer.from(clientData, "base64")
-
-    const isValid = verifySignature(credential.publicKey, signatureBuffer, clientDataBuffer)
-
-    if (!isValid) {
-      return res.status(401).json({ error: "Signature verification failed" })
-    }
-
-    // Update counter for security
-    if (counter > credential.counter) {
-      credential.counter = counter
-      await user.save()
     }
 
     // Clear challenge

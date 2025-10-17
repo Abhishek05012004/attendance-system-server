@@ -23,8 +23,8 @@ const userSchema = new mongoose.Schema(
     faceModelVersion: { type: String, default: "face-api-0.22.2" },
     fingerprintCredentials: [
       {
-        credentialId: { type: String, required: true },
-        publicKey: { type: String, required: true },
+        credentialId: { type: String, required: true, unique: true },
+        publicKeyJwk: { type: String }, // Store as JSON string
         counter: { type: Number, default: 0 },
         transports: [String],
         createdAt: { type: Date, default: Date.now },
@@ -32,6 +32,10 @@ const userSchema = new mongoose.Schema(
       },
     ],
     fingerprintEnrolled: { type: Boolean, default: false },
+    fingerprintChallenge: String,
+    fingerprintChallengeExpiry: Number,
+    fingerprintAuthChallenge: String,
+    fingerprintAuthChallengeExpiry: Number,
   },
   {
     timestamps: true,
