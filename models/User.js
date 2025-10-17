@@ -15,14 +15,23 @@ const userSchema = new mongoose.Schema(
     salary: Number,
     isActive: { type: Boolean, default: true },
     profileImage: String,
-    workingHours: { type: Number, default: 8 }, // hours per day
-    // Password reset fields
+    workingHours: { type: Number, default: 8 },
     resetPasswordToken: String,
     resetPasswordExpiry: Date,
-    // Face recognition fields
-    faceEmbedding: { type: [Number], default: undefined }, // 128-d descriptor
+    faceEmbedding: { type: [Number], default: undefined },
     faceEnrolled: { type: Boolean, default: false },
     faceModelVersion: { type: String, default: "face-api-0.22.2" },
+    fingerprintCredentials: [
+      {
+        credentialId: { type: String, required: true },
+        publicKey: { type: String, required: true },
+        counter: { type: Number, default: 0 },
+        transports: [String],
+        createdAt: { type: Date, default: Date.now },
+        deviceName: String,
+      },
+    ],
+    fingerprintEnrolled: { type: Boolean, default: false },
   },
   {
     timestamps: true,
