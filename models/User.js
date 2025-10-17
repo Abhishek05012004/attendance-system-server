@@ -30,7 +30,6 @@ const userSchema = new mongoose.Schema(
         counter: { type: Number, default: 0 },
         transports: [String],
         createdAt: { type: Date, default: Date.now },
-        deviceName: String,
       },
     ],
     fingerprintEnrolled: { type: Boolean, default: false },

@@ -34,11 +34,6 @@ function arrayBufferToBase64Url(buffer) {
 router.post("/register-options", auth, async (req, res) => {
   try {
     const user = req.user
-    const { deviceName } = req.body
-
-    if (!deviceName || !deviceName.trim()) {
-      return res.status(400).json({ error: "Device name is required" })
-    }
 
     // Generate a challenge
     const challenge = crypto.randomBytes(32)
@@ -82,10 +77,10 @@ router.post("/register-options", auth, async (req, res) => {
 router.post("/register", auth, async (req, res) => {
   try {
     const user = req.user
-    const { credentialId, attestationObject, clientDataJSON, transports, deviceName, challenge } = req.body
+    const { credentialId, attestationObject, clientDataJSON, transports, challenge } = req.body
 
     // Validate required fields
-    if (!credentialId) {
+    if (!credentialId || credentialId.trim() === "") {
       return res.status(400).json({ error: "Credential ID is required" })
     }
 
@@ -130,7 +125,6 @@ router.post("/register", auth, async (req, res) => {
       clientDataJSON: clientDataJSON || "",
       counter: 0,
       transports: transports || [],
-      deviceName: deviceName || "Device",
       createdAt: new Date(),
     })
 
@@ -268,7 +262,6 @@ router.get("/list", auth, async (req, res) => {
 
     const credentials = user.fingerprintCredentials.map((cred) => ({
       id: cred.credentialId,
-      deviceName: cred.deviceName,
       createdAt: cred.createdAt,
     }))
 
