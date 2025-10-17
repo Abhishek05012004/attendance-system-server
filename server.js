@@ -10,7 +10,6 @@ const attendanceRoutes = require("./routes/attendance")
 const userRoutes = require("./routes/users")
 const leaveRoutes = require("./routes/leave")
 const faceRoutes = require("./routes/face")
-const fingerprintRoutes = require("./routes/fingerprint")
 
 const app = express()
 
@@ -121,7 +120,6 @@ app.use("/api/attendance", attendanceRoutes)
 app.use("/api/users", userRoutes)
 app.use("/api/leave", leaveRoutes)
 app.use("/api/face", faceRoutes)
-app.use("/api/fingerprint", fingerprintRoutes)
 
 /* ================================
    HEALTH CHECK
@@ -168,7 +166,6 @@ app.get("/", (req, res) => {
       users: "/api/users",
       leave: "/api/leave",
       face: "/api/face",
-      fingerprint: "/api/fingerprint",
     },
   })
 })
@@ -196,15 +193,7 @@ app.use("*", (req, res) => {
   res.status(404).json({
     error: "Route not found",
     requestedUrl: req.originalUrl,
-    availableEndpoints: [
-      "/api/health",
-      "/api/auth",
-      "/api/attendance",
-      "/api/users",
-      "/api/leave",
-      "/api/face",
-      "/api/fingerprint",
-    ],
+    availableEndpoints: ["/api/health", "/api/auth", "/api/attendance", "/api/users", "/api/leave", "/api/face"],
   })
 })
 
