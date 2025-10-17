@@ -79,13 +79,13 @@ router.post("/register", auth, async (req, res) => {
     const user = req.user
     const { credentialId, attestationObject, clientDataJSON, transports, challenge } = req.body
 
-    // Validate required fields
-    if (!credentialId || credentialId.trim() === "") {
-      return res.status(400).json({ error: "Credential ID is required" })
+    if (!credentialId || typeof credentialId !== "string" || credentialId.trim().length === 0) {
+      console.error("[v0] Invalid credentialId:", credentialId, "Type:", typeof credentialId)
+      return res.status(400).json({ error: "Credential ID is required and must be a valid string" })
     }
 
-    if (!challenge) {
-      return res.status(400).json({ error: "Challenge is required" })
+    if (!challenge || typeof challenge !== "string") {
+      return res.status(400).json({ error: "Challenge is required and must be a valid string" })
     }
 
     // Verify challenge
@@ -94,6 +94,7 @@ router.post("/register", auth, async (req, res) => {
     }
 
     if (user.fingerprintChallenge !== challenge) {
+      console.error("[v0] Challenge mismatch. Expected:", user.fingerprintChallenge, "Got:", challenge)
       return res.status(400).json({ error: "Invalid challenge" })
     }
 
@@ -133,12 +134,14 @@ router.post("/register", auth, async (req, res) => {
     user.fingerprintChallengeExpiry = undefined
     await user.save()
 
+    console.log("[v0] Fingerprint registered successfully for user:", user._id)
+
     res.json({
       message: "Fingerprint registered successfully",
       success: true,
     })
   } catch (error) {
-    console.error("Error registering fingerprint:", error)
+    console.error("[v0] Error registering fingerprint:", error)
     res.status(500).json({ error: error.message })
   }
 })
